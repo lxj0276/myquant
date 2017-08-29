@@ -87,27 +87,28 @@ class get_quote:
         dataname:数据名“quote”
         func: get_quote 或者 get_indexquoe
         '''
-        quote = func('19900101','19991231') 
-        quote01 = func('19991231','20091231')
-        quote02 = func('20091231','20191231')
-        quote = quote.append(quote01)
-        quote = quote.append(quote02)  
-        quote.to_hdf("C:\\py_data\\datacenter\\quote.h5",'%s'%dataname,format='table',mode='w',data_columns=quote.columns)
-     
+#        quote = func('19900101','19991231') 
+#        quote01 = func('19991231','20091231')
+#        quote02 = func('20091231','20191231')
+#        quote = quote.append(quote01)
+#        quote = quote.append(quote02)  
+        
+        quote = func('20091231','20191231')
+        #store = pd.HDFStore("C:\\py_data\\datacenter\\quote.h5",'w')
+        quote.to_hdf("C:\\py_data\\datacenter\\quote.h5",key='%s'%dataname,format='table',mode='a',data_columns=quote.columns)
+        
     
     def updata_quote(self,dataname,func):
         '''
-        更新数据
+        更新行情数据
         '''
         enddate = '20990101'
-        quote = pd.read_hdf("C:\\py_data\\datacenter\\quote.h5",'%'%dataname)     
-        startdate = quote['TradingDay'].max()
+        dt = pd.read_hdf("C:\\py_data\\datacenter\\quote.h5",'%'%dataname,columns=['TradingDay'],where='SecuCode="000001"')     
+        startdate = dt['TradingDay'].max()
         startdate = datetime.datetime.strftime(startdate,"%Y%m%d")
+        enddate = "20200101"
         new_quote = func(startdate,enddate) #提取更新数据
-        quote = quote.append(new_quote)
-        quote = quote.sort_valaues(['TradingDay','SecuCode'],ascending=False)
-        quote = quote.drop_duplicates(['SecuCode','TradingDay']) #删除重复数据
-        quote.to_hdf("C:\\py_data\\datacenter\\quote.h5",'%s'%dataname,format='table',mode='w',data_columns=quote.columns)
+        quote.to_hdf("C:\\py_data\\datacenter\\quote.h5",key='%s'%dataname,format='table',mode='r+',data_columns=quote.columns,append=True)
 
         
     #------------------------获取wind数据--------------------------------------------------------
@@ -116,12 +117,14 @@ class get_quote:
 if __name__ == '__main__':
      get =  get_quote()
      
-     updata_quote('equity_quote',get.get_equityquote)#更新股票程序
-     updata_quote('index_quote',get.get_indexquote) #更新指数行情程序
+    
          
      #当且仅当从头开始提取数据时运行，否则运行
      get.new_data('equity_quote',get.get_equityquote) #提取股票行情
      get.new_data('index_quote',get.get_indexquote) #提取指数行情
+     
+     updata_quote('equity_quote',get.get_equityquote)#更新股票程序
+     updata_quote('index_quote',get.get_indexquote) #更新指数行情程序
   
      
 #     import time
@@ -131,5 +134,5 @@ if __name__ == '__main__':
 #     print(t2-t1)
     
      equity_bonus = get.get_bonus()
-     equity_bonus.to_excel("C:\\py_data\\datacenter\\quote.h5",'bonus',format='table',mode='w',data_columns=bonus.column)
+     equity_bonus.to_hdf("C:\\py_data\\datacenter\\quote.h5",key='bonus',format='table',mode='a',data_columns=equity_bonus.columns)
       
