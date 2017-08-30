@@ -10,6 +10,9 @@ import numpy as np
 import pymysql
 import datetime
 from tqdm import tqdm
+import warnings
+warnings.filterwarnings("ignore")
+
 '''
 修改：本次修改了每年超额收益的bug；
 备注：可以设定最大的买入股票只数，但是每一期的买入，都是全额投入，比如第一期买入4只股票，
@@ -24,6 +27,7 @@ quoe:行情数据，至少包含cp,precp,vol,fq_cp[计算止损止盈用]字段
 '''
  
 class trade:
+    datapath = "C:\\py_data\\datacenter\\quote.h5"
     unit = 100
     feeratio = 0.0015
     init_cash = 100000000
@@ -54,8 +58,7 @@ class trade:
         gain_rtn: 止盈收益率，如0.2，代表个股盈利20%止盈
         stop_type: 'relative':相对模式，如个股票盈利10%，而基准盈利-10%，那么相对盈利20%，止盈止损位相对，其他为绝对止损........
         '''
-        #super.__init__(self) 
-        self.datapath = "C:\\py_data\\datacenter\\quote.h5"
+        self.datapath = datapath
         self.unit = unit
         self.feeratio = feeratio
         self.init_cash = init_cash
@@ -125,12 +128,13 @@ class trade:
         tradedetail = pd.DataFrame()
         add_holdvol = pd.Series()
         holddays = holddays + 1
+        buylist = buylist[buylist.index.isin(holdvol.index)] #只关注持仓中的行情
         
         #先卖出股票,腾出资金        
         if len(sell_holdvol) > 0:
-            day = datetime.datetime.strtime(buylist['TradingDay'][-1],"%Y%m%d")
+            day = datetime.datetime.strftime(buylist['TradingDay'][-1],"%Y%m%d")
             sell_quote = pd.read_hdf(self.datapath,'equity_quote',columns=['SecuCode','cp','precp','vol'],
-                                     where='SecuCode in %s & TradingDay=%s'%(str(sell_holdvol.index),day))                          
+                                     where='SecuCode in %s & TradingDay=%s'%(str(list(sell_holdvol.index)),day))                          
             sell_quote.index = sell_quote['SecuCode']
             surplus_cash,sell_tradefee,sell_stockvalue,sell_holdvol,day_sell_holdvol,sell_cash =  self.sell_trade(sell_holdvol,sell_quote,surplus_cash)
             if len(day_sell_holdvol) > 0:
@@ -225,9 +229,10 @@ class trade:
         else:
             wait_buycash['diff_cash'] = wait_buycash.values
         if len(sell_holdvol) > 0:
-            day = datetime.datetime.strtime(buylist['TradingDay'][-1],"%Y%m%d")
+            day = datetime.datetime.strftime(buylist['TradingDay'][-1],"%Y%m%d")
             sell_quote = pd.read_hdf(self.datapath,'equity_quote',columns=['SecuCode','cp','precp','vol'],
-                                     where='SecuCode in %s & TradingDay=%s'%(sell_holdvol.index,day))
+                                     where='SecuCode in %s & TradingDay=%s'%(str(list(sell_holdvol.index)),day))
+            sell_quote.index=sell_quote['SecuCode']
             surplus_cash,sell_tradefee,sell_stockvalue,sell_holdvol,day_sell_holdvol,sell_cash =  self.sell_trade(sell_holdvol,sell_quote,surplus_cash)
             if len(day_sell_holdvol) > 0:
                 sell_tradedetail = pd.DataFrame(day_sell_holdvol.values,columns=['卖出成交数量'],index=day_sell_holdvol.index)
@@ -364,9 +369,8 @@ class trade:
                              where='ExDiviDate>=%s & ExDiviDate<=%s'%(starttime,endtime))         
         #获取基准数据
         benchmark =  pd.read_hdf(self.datapath,'index_quote',columns=['TradingDay','SecuCode','cp'],
-                                     where='SecuCode=%s & TradingDay>%s & TradingDay<=%s'%(benchmark_code,starttime,endtime))           
-        
-        #quote.loc[:,'rtn'] =  quote['cp'] / quote['precp'] - 1     
+                                     where='SecuCode in %s & TradingDay>%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,endtime))           
+        benchmark.index = benchmark['TradingDay']
         asset0 = []
         holdvol0 = pd.DataFrame()
         stockvalue0 = pd.DataFrame()
@@ -387,7 +391,7 @@ class trade:
             #i=1
             nowtime = datetime.datetime.strftime(timeindex.iloc[i][0],"%Y%m%d")
             if i == len(timeindex) - 1:
-                nexttime = endtime
+                nexttime = enddate
             else:
                 nexttime =  datetime.datetime.strftime(timeindex.iloc[i+1][0],"%Y%m%d")
   
@@ -400,13 +404,14 @@ class trade:
                 buystock =  cannot_sellstock.index.append(day_buy.index)
             
             #获取本次调仓时间到下次调仓时间的数据
-            session_quote = pd.read_hdf(datapath,'equity_quote',columns=['TradingDay','SecuCode','cp','precp','fq_cp','vol'],
-                                     where='SecuCode in %s & TradingDay>%s & TradingDay<=%s'%(str(buystock),starttime,endtime))  
+            session_quote = pd.read_hdf(self.datapath,'equity_quote',columns=['TradingDay','SecuCode','cp','precp','fq_cp','vol'],
+                                     where='SecuCode in %s & TradingDay>%s & TradingDay<=%s'%(str(list(buystock)),nowtime,nexttime))  
             
             session_quote = pd.merge(session_quote,day_buy[['SecuCode','signal_rank']],on=['SecuCode'],how='left')
             session_quote['signal_rank'] = session_quote['signal_rank'].fillna(0)
+            session_quote.index  =session_quote['TradingDay']
             
-            session_timeindex = pd.DataFrame(session_quote['TradingDay'].drop_duplicates())
+            session_timeindex = session_quote[['TradingDay']].drop_duplicates()
             session_timeindex = session_timeindex.sort_index()
             
               
@@ -419,11 +424,12 @@ class trade:
                                                 
                     #第一天的处理
                     if day == session_timeindex.index.min():  
+                        day_buylist['signal_rank'] = day_buylist['signal_rank'].rank(method='first')    
                         day_buylist = day_buylist[day_buylist['signal_rank']<=self.buynumber]
                         day_buylist['weight'] = 1.0 / len(day_buylist)
                         sell_stockvalue =  pd.Series(0)
                         trade_fq_cp = day_buylist['fq_cp'] #记录复权成交价 
-                        trade_benchmark_cp = trade_fq_cp / trade_fq_cp *benchmark[day]['cp'] #成交日基准价格
+                        trade_benchmark_cp = trade_fq_cp / trade_fq_cp *benchmark.ix[day]['cp'] #成交日基准价格
                          #涨停无法买入                   
                         asset,surplus_cash,tradefee,stockvalue,holdvol,wait_buycash,holddays,tradedetail = self.first_buytrade(day_buylist)  
                         
@@ -548,7 +554,7 @@ class trade:
                        
                     else:                        
                         asset,surplus_cash,tradefee,stockvalue,holdvol,wait_buycash,sell_holdvol,holddays,tradedetail = \
-                        self.run_trade(day_buylist,surplus_cash,holdvol,wait_buycash,sell_holdvol,sell_quote,holddays)
+                        self.run_trade(day_buylist,surplus_cash,holdvol,wait_buycash,sell_holdvol,holddays)
                     
                     asset0.append([asset,tradefee,surplus_cash,stockvalue.sum(),sell_stockvalue.sum()])
                     holdvol0 = holdvol0.append(pd.DataFrame(holdvol))
@@ -710,19 +716,21 @@ class trade:
         month_turnover = pd.DataFrame(month_turnover.rename('换手率%'))
         month_sy = pd.merge(month_sy,month_turnover,left_index=True,right_index=True,how='left')        
         
+        
         performance = performance.append(year_sy)
         
         if benchmark_code is not None:
             starttime = datetime.datetime.strftime(asset.index.min(),"%Y%m%d")
             endtime =  datetime.datetime.strftime(asset.index.max(),"%Y%m%d")
             benchmark_data =  pd.read_hdf(self.datapath,'index_quote',columns=['TradingDay','SecuCode','cp'],
-                                     where='SecuCode=%s & TradingDay>=%s & TradingDay<=%s'%(benchmark_code,starttime,endtime))     
+                                     where='SecuCode in %s & TradingDay>=%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,endtime))     
+            benchmark_data.index  =benchmark_data['TradingDay']
             benchmark_rtn = np.log(benchmark_data['cp'] / benchmark_data['cp'].shift(1))  
             #benchmark_rtn = benchmark_rtn.dropna()
             benchmark_sy = 100 *(np.exp(benchmark_rtn.sum()) - 1)
             benchmark_nav = pd.DataFrame(np.exp(benchmark_rtn.fillna(0).cumsum()) - 1)
             #benchmark_nav = pd.DataFrame(benchmark_nav.values,index=benchmark_nav.index,columns=['基准收益']
-            alpha = 1 + asset['净值'] /asset['净值'][0] - benchmark_data['cp']/benchmark_data['cp'][0]
+            alpha = 1 + asset['净值'] /asset['净值'].iloc[0] - benchmark_data['cp']/benchmark_data['cp'].iloc[0]
             alpha = alpha/alpha.shift(1) -  1
             alpha = alpha.fillna(0)
             group_year2 = benchmark_rtn.groupby(lambda x:x.year) 
@@ -757,57 +765,25 @@ class trade:
         
         return performance,m_nav                                    
 if __name__ == "__main__":
-    #获取数据
-   
-    #get= get_data()
-    trade_func = trade(100,0.0015,100000,0.1,'cp',0.095,1000,5,30,'abs')
-     
+##------------运行模拟程序选股------------------------------------------------------------------
+    trade_func = trade(
+                    datapath =  "C:\\py_data\\datacenter\\quote.h5",
+                    unit = 100,
+                    feeratio = 0.0015,
+                    init_cash = 100000000,
+                    volratio = 0.1,
+                    tradeprice = 'cp',
+                    daily_limit = 0.1 ,
+                    min_wait_buycash = 20000,
+                    buynumber = 20,
+                    min_holddays = 10,
+                    stop_type = 'abs',
+                    loss_rtn = None,
+                    gain_rtn=None)
     
-    #need_code = str(tuple(range(1,10)))
-    #quote,jz = get.get_quote(need_code,"20070101","20070801")    
-    #bonus = get.get_bonus(need_code,"20070101","20070801")
-    
-    
-    #获得
-    #buylist = pd.read_excel("C:\\Users\\chenghg\\Desktop\\金贝塔调仓\\高管增持2010年1月份以来历史数据.xlsx")    
-    #buylist = buylist[:100] 
-    #buylist = buylist[['innercode','SecuCode','secuabbr','signal_rank']]
-    
-    #buylist = gfh
-    #need_code = str(tuple(buylist['innercode'].drop_duplicates()))
-    #quote,jz = get.get_quote(need_code,"20130401","20160630")    
-    #bonus = get.get_bonus(need_code,"20130401","20160630")
-    
-    
-    '''
-    startdate = "20100101"
-    enddate = "20131231"
-    buylist = quote.sort(['TradingDay','InnerCode'])[:100]
-    buylist['signal_rank'] =  buylist.groupby(['TradingDay'])['InnerCode'].rank()
-    buylist = buylist.drop(['20070105','20070108','20070109','20070123','20070124']) 
-    
-    SecuCode =   str(tuple(pd.DataFrame(aa['代码']).drop_duplicates().get_values().T[0]))
-    get_innercode_sql = "select InnerCode,SecuCode from secumain where SecuCategory=1 and secucode in "+secucode+" "
-    innercode = pd.read_sql(get_innercode_sql,con=get.engine)
-    
-    need_code = str(tuple(innercode.innercode))
-    quote,jz = get.get_quote('(3,51)',"20100101","20100131",'000300')    
-    bonus = get.get_bonus(need_code,"20100101","20131231")
-    
-    aa = pd.merge(aa,innercode,left_on=['代码'],right_on=['secucode'])
-    aa['signal_rank'] = aa.groupby(['最新公告日期'])['变动数量占流通量比例(%)'].rank(ascending=False)
-    aa = aa.sort(['最新公告日期','signal_rank'])
-    aa['innercode'] = aa['innercode_x']
-    aa['secucode'] = aa['secucode_x']
-    aa['secuabbr'] = aa['名称']
-    aa.index = aa['最新公告日期']
-    buylist = aa[['innercode','secucode','secuabbr','signal_rank']]
-     
-    
-    #开始交易
-    '''
-    #asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 = trade_func.settle(buylist,quote,bonus,'20160630')
-    #performance,year_sy = trade_func.performance(asset)
+    #asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 = trade_func.settle(buylist,"000001",'20170331')
+    #performance,m_nav = trade_func.performance(asset,"000001")     
+
     
         
     
