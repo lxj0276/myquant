@@ -63,7 +63,7 @@ class get_quote:
         sql = "select d.Secucode,d.SecuAbbr,c.TradingDay,c.ClosePrice as cp from QT_IndexQuote c\
                 INNER JOIN (select b.Secucode,b.SecuAbbr,b.innercode,a.pubdate as ListedDate from LC_IndexBasicInfo as a \
                 inner join (select * from secumain where secucategory in (4) and secumarket in (83,90) and listedstate=1)as b\
-                on a.IndexCode=b.innercode where (IndexType=10 or (IndexType=30 and industrystandard in (3,9,24)))) as d\
+                on a.IndexCode=b.innercode where (IndexType in (10,47) or (IndexType=30 and industrystandard in (3,9,24)))) as d\
                 on c.innercode=d.innercode where TradingDay >STR_TO_DATE("+startdate+",'%Y%m%d')   and\
                  TradingDay <=STR_TO_DATE("+enddate+",'%Y%m%d') order by TradingDay desc "
         indexquote = pd.read_sql(sql,con=self._dbengine1)
@@ -87,13 +87,13 @@ class get_quote:
         dataname:数据名“quote”
         func: get_quote 或者 get_indexquoe
         '''
-#        quote = func('19900101','19991231') 
-#        quote01 = func('19991231','20091231')
-#        quote02 = func('20091231','20191231')
-#        quote = quote.append(quote01)
-#        quote = quote.append(quote02)  
+        quote = func('19900101','19991231') 
+        quote01 = func('19991231','20091231')
+        quote02 = func('20091231','20191231')
+        quote = quote.append(quote01)
+        quote = quote.append(quote02)  
         
-        quote = func('20091231','20191231')
+        #quote = func('20091231','20191231')
         #store = pd.HDFStore("C:\\py_data\\datacenter\\quote.h5",'w')
         quote.to_hdf("C:\\py_data\\datacenter\\quote.h5",key='%s'%dataname,format='table',mode='a',data_columns=quote.columns)
         
@@ -123,8 +123,8 @@ if __name__ == '__main__':
      get.new_data('equity_quote',get.get_equityquote) #提取股票行情
      get.new_data('index_quote',get.get_indexquote) #提取指数行情
      
-     updata_quote('equity_quote',get.get_equityquote)#更新股票程序
-     updata_quote('index_quote',get.get_indexquote) #更新指数行情程序
+     get.updata_quote('equity_quote',get.get_equityquote)#更新股票程序
+     get.updata_quote('index_quote',get.get_indexquote) #更新指数行情程序
   
      
 #     import time
