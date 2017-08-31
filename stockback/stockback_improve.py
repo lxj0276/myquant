@@ -25,6 +25,7 @@ warnings.filterwarnings("ignore")
 quoe:行情数据，至少包含cp,precp,vol,fq_cp[计算止损止盈用]字段
 1. 止盈、止损仅在调仓日进行判断，并不是每日判断
 '''
+tradepath = 
  
 class trade:
     datapath = "C:\\py_data\\datacenter\\quote.h5"
@@ -42,7 +43,7 @@ class trade:
     gain_rtn=None
     
         
-    def __init__(self,datapath,unit,feeratio,init_cash,volratio,tradeprice,daily_limit,min_wait_buycash,buynumber,min_holddays,stop_type,loss_rtn=None,gain_rtn=None):
+    def __init__(self,datapath,savepath,unit,feeratio,init_cash,volratio,tradeprice,daily_limit,min_wait_buycash,buynumber,min_holddays,stop_type,loss_rtn=None,gain_rtn=None):
         '''
         unit:单位，默认100
         feeratio:手续费，默认千分之1.5
@@ -59,6 +60,7 @@ class trade:
         stop_type: 'relative':相对模式，如个股票盈利10%，而基准盈利-10%，那么相对盈利20%，止盈止损位相对，其他为绝对止损........
         '''
         self.datapath = datapath
+        self.savepath = savepath
         self.unit = unit
         self.feeratio = feeratio
         self.init_cash = init_cash
@@ -91,7 +93,7 @@ class trade:
         position_cash:初始买入金额，由于仓位没满，留出的部分现金
         '''
         goal_buycash = self.init_cash * buylist['weight']   
-        # buylist = self.adjust_weight(buylist)  #涨停股票权重设为0，即不买入
+        #涨停股票权重设为0，即不买入
         buylist['weight'] =  np.where(buylist['cp']>=(1+self.daily_limit)*buylist['precp']-0.01,0,buylist['weight'])       
         real_goal_buycash = self.init_cash * buylist['weight']
         holdvol = pd.concat([np.floor(real_goal_buycash / buylist[self.tradeprice] / (1+self.feeratio) / self.unit),
@@ -110,7 +112,6 @@ class trade:
         tradedetail['成交金额'] =  real_buycash
         tradedetail['成交价格'] =  buylist[self.tradeprice] 
         tradedetail['剩余目标金额'] = wait_buycash
-        #trade_fq_cp =  buylist['fq_cp'] #买入复权价，止盈、止损用途
         return asset,surplus_cash,tradefee,stockvalue,holdvol,wait_buycash,holddays,tradedetail
     
     def run_trade(self,buylist,surplus_cash,holdvol,wait_buycash,sell_holdvol,holddays):
@@ -203,10 +204,7 @@ class trade:
 
         if len(keep_holdvol) > 0:#持仓reblance部分
             keep_stockvalue =  stockvalue[stockvalue.index.isin(keep_holdvol.index)]
-            keep_stockvalue = pd.DataFrame(keep_stockvalue,index=keep_stockvalue.index,columns=['keep_stockvalue'])
-            #buylist = pd.merge(buylist,keep_stockvalue,left_index=True,right_index=True,how='left')
-            #buylist['keep_stockvalue'] = buylist['keep_stockvalue'].fillna(0)
-             
+            keep_stockvalue = pd.DataFrame(keep_stockvalue,index=keep_stockvalue.index,columns=['keep_stockvalue'])           
             goal_buycash = pd.merge(wait_buycash,keep_stockvalue,left_index=True,right_index=True,how='left')
             goal_buycash['keep_stockvalue'] = goal_buycash['keep_stockvalue'].fillna(0)
             goal_buycash['diff_cash'] = goal_buycash['weight'] - goal_buycash['keep_stockvalue']
@@ -242,7 +240,7 @@ class trade:
         new_goal_buycash = wait_buycash['diff_cash']
         new_goal_buycash[new_goal_buycash<0] = 0    
         if  new_goal_buycash.max() >= self.min_wait_buycash:             
-        #buylist = self.adjust_weight(buylist)  #涨停股票权重设为0，即不买入
+            #涨停股票权重设为0，即不买入
             buylist['weight'] =  np.where(buylist['cp']>=(1+self.daily_limit)*buylist['precp']-0.01,0,buylist['weight'])
             weight = new_goal_buycash  /   new_goal_buycash.sum()
             day_weight = pd.merge(pd.DataFrame(weight),buylist[['weight','SecuCode']],left_index=True,right_index=True,how='left')#涨停不买入
@@ -275,9 +273,7 @@ class trade:
             
         
         asset = stockvalue.sum() + sell_stockvalue.sum() + surplus_cash
-        tradefee = tradefee + sell_tradefee
-        #trade_fq_cp = buylist['fq_cp'] 
-         
+        tradefee = tradefee + sell_tradefee         
         return asset,tradefee,surplus_cash,holdvol,sell_holdvol,wait_buycash,stockvalue,sell_stockvalue,holddays,sell_holddays,tradedetail
               
         
@@ -298,8 +294,6 @@ class trade:
         sell_stockvalue = surplus_holdvol * sell_quote[self.tradeprice] * self.unit
         surplus_holdvol = surplus_holdvol[surplus_holdvol>0]
         sell_stockvalue = sell_stockvalue[sell_stockvalue>0]
-
-        #sell_tradefee = sell_tradefee.sum()
         return surplus_cash,sell_tradefee,sell_stockvalue,surplus_holdvol,day_sell_holdvol,sell_cash
     
     def bonus_deal(self,day_bonus,holdvol,sell_holdvol,surplus_cash,asset): 
@@ -357,24 +351,20 @@ class trade:
         '''
         timeindex = pd.DataFrame(buylist.index.drop_duplicates().values)
         timeindex = timeindex[timeindex[0]<=enddate]
-        starttime = datetime.datetime.strftime(timeindex[0].min(),"%Y%m%d")
-        endtime = datetime.datetime.strftime(timeindex[0].max(),"%Y%m%d")
-        
-#        quote =  pd.read_hdf(self.datapath,'equity_quote',columns=['TradingDay','SecuCode','cp','precp','fq_cp','vol'],
-#                                     where='TradingDay>%s & TradingDay<=%s'%(starttime,endtime))         
-#        quote = quote[quote['SecuCode'].isin(buylist['SecuCode'])]
+        timeindex['date'] = timeindex[0].apply(lambda x:datetime.datetime.strftime(x,"%Y%m%d"))
+        starttime = timeindex['date'].min() 
         #获取分红数据
-
         bonus =  pd.read_hdf(self.datapath,'bonus', columns=['ExDiviDate','SecuCode','BonusShareRatio','TranAddShareRaio','CashDiviRMB'],
-                             where='ExDiviDate>=%s & ExDiviDate<=%s'%(starttime,endtime))         
-        #获取基准数据
+                             where='ExDiviDate>=%s & ExDiviDate<=%s'%(starttime,enddate))         
+        #获取基准行情数据
         benchmark =  pd.read_hdf(self.datapath,'index_quote',columns=['TradingDay','SecuCode','cp'],
-                                     where='SecuCode in %s & TradingDay>%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,endtime))           
+                                     where='SecuCode in %s & TradingDay>%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,enddate))           
         benchmark.index = benchmark['TradingDay']
+        
+
         asset0 = []
         holdvol0 = pd.DataFrame()
         stockvalue0 = pd.DataFrame()
-        #sell_stockvalue0 = pd.DataFrame()
         sell_holdvol0 = pd.DataFrame()
         wait_buycash0 = pd.DataFrame()
         holddays0 = pd.DataFrame()
@@ -383,17 +373,14 @@ class trade:
         buytime = []
         selltime = []
         day1 = []
-
-       
         holddays = pd.Series()
+        
         for i in tqdm(range(len(timeindex))):
-        #for i in range(11):
-            #i=1
-            nowtime = datetime.datetime.strftime(timeindex.iloc[i][0],"%Y%m%d")
+            nowtime =  timeindex.iloc[i]['date'] 
             if i == len(timeindex) - 1:
                 nexttime = enddate
             else:
-                nexttime =  datetime.datetime.strftime(timeindex.iloc[i+1][0],"%Y%m%d")
+                nexttime =  timeindex.iloc[i+1]['date']
   
             day_buy = buylist[buylist.index==nowtime]
             day_buy.index = day_buy['SecuCode']
@@ -414,8 +401,6 @@ class trade:
             session_timeindex = session_quote[['TradingDay']].drop_duplicates()
             session_timeindex = session_timeindex.sort_index()
             
-              
-             
             if i == 0: #第一次交易，仅有买入
                 for day in session_timeindex.index:
                     day_buylist = session_quote[session_quote['TradingDay']==day]
@@ -559,7 +544,6 @@ class trade:
                     asset0.append([asset,tradefee,surplus_cash,stockvalue.sum(),sell_stockvalue.sum()])
                     holdvol0 = holdvol0.append(pd.DataFrame(holdvol))
                     stockvalue0 = stockvalue0.append(pd.DataFrame(stockvalue))
-                    #sell_stockvalue0 = sell_stockvalue0.append(pd.DataFrame(sell_stockvalue))
                     sell_holdvol0 = sell_holdvol0.append(pd.DataFrame(sell_holdvol))
                     holddays0 = holddays0.append(pd.DataFrame(holddays))
                     buytime.append(pd.DataFrame(len(holdvol)*[day]))
@@ -581,8 +565,6 @@ class trade:
         holdvol0['天数'] =  np.array(holddays0 )
         holdvol0['目标金额'] = np.array( wait_buycash0 )
         holdvol0['date']  =  np.array(buytime[0])
-    
-        
        
          #插入代码和简称
         name_info = buylist[['SecuCode','SecuAbbr']].drop_duplicates()
@@ -591,28 +573,16 @@ class trade:
 
         holdvol = pd.merge(name_info,holdvol0,on='SecuCode',how='right')
         holdvol = pd.DataFrame(np.array(holdvol),columns=['证券代码','证券简称','持仓数量','市值','天数','目标金额','日期'])
-    
-                  
-        
+          
         if len(selltime) > 0:
            sell_holdvol0['SecuCode'] =  sell_holdvol0.index
            sell_holdvol0['date'] = np.array(selltime[0])
            sell_holdvol = pd.merge(name_info,sell_holdvol0,on='SecuCode',how='right')
            sell_holdvol = pd.DataFrame(np.array(sell_holdvol),columns=['证券代码','证券简称','持仓数量','日期'])
-       
-            #sell_holdvol['temp'] = list(zip(sell_holdvol.index,sell_holdvol['代码']))
-            #sell_stockvalue0 = sell_stockvalue0[sell_stockvalue0[0]>0] 
-            #sell_stockvalue0['代码'] = sell_stockvalue0.index
-            #sell_stockvalue = pd.DataFrame(sell_stockvalue0.values,index=selltime[0],columns=['持仓市值','代码'])
-            #sell_stockvalue['temp'] = list(zip(sell_stockvalue.index,sell_stockvalue['代码']))
-            #sell_holdvol = pd.merge(sell_holdvol,sell_stockvalue,on=['temp'])
-            #sell_holdvol = sell_holdvol.drop(['temp'],axis=1)
-            #sell_holdvol.index = selltime[0]
+
         else:
             sell_holdvol = pd.DataFrame(columns=['证券代码','证券简称','持仓数量','日期'])
-            
-        
-       
+
         tradedetail0 = pd.merge(name_info,tradedetail0,right_index=True,left_on='SecuCode',how='right')      
         
         
@@ -621,7 +591,7 @@ class trade:
             sell_holdvol.to_excel(writer,'待卖出股票情况')           
             sell_holddays0.to_excel(writer,'股票持仓天数统计')
             tradedetail0.to_excel(writer,"每日成交明细")
-        holdvol.to_csv("C:\\py_data\\textdata\\每日持仓明细.csv")
+            holdvol.to_excel(writer,"每日持仓明细")
         
         return asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 
     
@@ -666,17 +636,13 @@ class trade:
         return alpha_nav,alpha_month_sy,alpha_performance
             
     def performance(self,data,benchmark_code=None):
-        #data = asset2
-        #benchmark_data=jz:基准行情数据
-        #columns = ['name1','name2','name3','name4']  
-        #descrip = pd.DataFrame(columns=columns)
-        #descrip = descrip.append(pd.DataFrame(np.array([['运行期间',data.index.min(),data.index.max(),'']]),columns=columns))
-        #descrip = descrip.append(pd.DataFrame(np.array([['期初净值',self.init_cash,'期末净值',np.round(data[data.index==asset.index.max()]['净值'][0],2)]]),columns=columns))        
+        '''
+        策略绩效汇总
+        '''
         asset = data[['净值']]  
         max_asset = asset.cummax()
         loss_from_max = asset / max_asset - 1 
         maxdrawdown = 100 * loss_from_max.min()
-        #firstday_rtn = np.log(asset.ix[0][0] / self.init_cash)
         rtn = np.log(asset/asset.shift(1))
         rtn = rtn.fillna(0) #第一天的处理
         m_nav = np.exp(rtn.cumsum()) - 1 
@@ -696,14 +662,12 @@ class trade:
         group_rtn = np.exp(group_year.cumsum())
         group_rtn  = group_rtn / group_rtn.groupby(lambda x:x.year).cummax() - 1
         year_maxdrawdown = 100 *(group_rtn.groupby(lambda x:x.year).min())
-        #year_sy = pd.DataFrame(100 * (np.exp(rtn.resample('a',how='sum')) - 1) ) 
         year_sy = 100 * (np.exp(group_year.sum()) - 1)
         temp_year_sy = pd.DataFrame(np.array(year_sy),index=year_sy.index)
         year_sy['净值'] = year_sy['净值'].apply(lambda x :str('%.2f'%x))
         year_maxdrawdown['净值'] = year_maxdrawdown['净值'].apply(lambda x :str('%.2f'%x))
         year_sy[0] =  list(zip(year_sy['净值'],year_maxdrawdown['净值']))
         year_sy = year_sy.drop(['净值'],axis=1)
-        #year_sy = pd.merge(year_sy,year_maxdrawdown,left_index=True,right_index=True) 
         month_sy = pd.DataFrame(100 * (np.exp(rtn.resample('m').sum())) - 1)   
         #每年换手率情况
         turnover_group = 100 * (data['手续费']/self.feeratio/data['净值']) / 2
@@ -714,9 +678,7 @@ class trade:
         #月换手率情况
         month_turnover = turnover_group.resample('m').sum()
         month_turnover = pd.DataFrame(month_turnover.rename('换手率%'))
-        month_sy = pd.merge(month_sy,month_turnover,left_index=True,right_index=True,how='left')        
-        
-        
+        month_sy = pd.merge(month_sy,month_turnover,left_index=True,right_index=True,how='left')         
         performance = performance.append(year_sy)
         
         if benchmark_code is not None:
@@ -726,10 +688,8 @@ class trade:
                                      where='SecuCode in %s & TradingDay>=%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,endtime))     
             benchmark_data.index  =benchmark_data['TradingDay']
             benchmark_rtn = np.log(benchmark_data['cp'] / benchmark_data['cp'].shift(1))  
-            #benchmark_rtn = benchmark_rtn.dropna()
             benchmark_sy = 100 *(np.exp(benchmark_rtn.sum()) - 1)
             benchmark_nav = pd.DataFrame(np.exp(benchmark_rtn.fillna(0).cumsum()) - 1)
-            #benchmark_nav = pd.DataFrame(benchmark_nav.values,index=benchmark_nav.index,columns=['基准收益']
             alpha = 1 + asset['净值'] /asset['净值'].iloc[0] - benchmark_data['cp']/benchmark_data['cp'].iloc[0]
             alpha = alpha/alpha.shift(1) -  1
             alpha = alpha.fillna(0)
@@ -748,7 +708,6 @@ class trade:
 
             performance = pd.merge(performance,alpha_performance,left_index=True,right_index=True,how='outer')
             performance = pd.merge(performance,alpha_performance2,left_index=True,right_index=True,how='left')
-            #performance1 = performance.apply(lambda x:str(x).replace(",",''))
             month_sy = pd.merge(month_sy,alpha_month_sy,left_index=True,right_index=True)
             month_sy = pd.merge(month_sy,alpha_month_sy2,left_index=True,right_index=True)
             m_nav = pd.merge(m_nav,benchmark_nav,left_index=True,right_index=True)
