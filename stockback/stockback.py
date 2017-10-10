@@ -654,7 +654,7 @@ class trade:
         alpha_year_sy[0] =  list(zip(alpha_year_sy[0],alpha_year_maxdrawdown[0]))
         
         #alpha_year_sy = alpha_year_sy.drop([0],axis=1)      
-        alpha_month_sy = pd.DataFrame(100 * (np.exp(alpha.resample('m').sum())) - 1)   
+        alpha_month_sy = pd.DataFrame(100 * (np.exp(alpha.resample('m').sum())-1))   
         alpha_month_sy = pd.DataFrame(alpha_month_sy.values,index=alpha_month_sy.index,columns=[jz_name])
         alpha_performance = alpha_performance.append(alpha_year_sy)
         alpha_performance = pd.DataFrame(alpha_performance.values,index=alpha_performance.index,columns=[jz_name])
@@ -693,7 +693,7 @@ class trade:
         year_maxdrawdown['净值'] = year_maxdrawdown['净值'].apply(lambda x :str('%.2f'%x))
         year_sy[0] =  list(zip(year_sy['净值'],year_maxdrawdown['净值']))
         year_sy = year_sy.drop(['净值'],axis=1)
-        month_sy = pd.DataFrame(100 * (np.exp(rtn.resample('m').sum())) - 1)   
+        month_sy = pd.DataFrame(100 * (np.exp(rtn.resample('m').sum()) - 1))   
         #每年换手率情况
         turnover_group = 100 * (data['手续费']/self.feeratio/data['净值']) / 2
         year_turnover_group = turnover_group.groupby(lambda x:x.year)
@@ -709,9 +709,11 @@ class trade:
         if benchmark_code is not None:
             starttime = datetime.datetime.strftime(asset.index.min(),"%Y%m%d")
             endtime =  datetime.datetime.strftime(asset.index.max(),"%Y%m%d")
-            benchmark_data =  pd.read_hdf(self.datapath,'index_quote',columns=['TradingDay','SecuCode','cp'],
+            benchmark_data =  pd.read_hdf(self.datapath,'index_quote',columns=['TradingDay','SecuCode','SecuAbbr','cp'],
                                      where='SecuCode in %s & TradingDay>=%s & TradingDay<=%s'%(str(tuple((benchmark_code,'000'))),starttime,endtime))     
+            benchmakr_name = benchmark_data['SecuAbbr'].iloc[0]
             benchmark_data.index  =benchmark_data['TradingDay']
+            benchmark_data = benchmark_data.sort_index() #按照时间顺序排序
             benchmark_rtn = np.log(benchmark_data['cp'] / benchmark_data['cp'].shift(1))  
             benchmark_sy = 100 *(np.exp(benchmark_rtn.sum()) - 1)
             benchmark_nav = pd.DataFrame(np.exp(benchmark_rtn.fillna(0).cumsum()) - 1)
@@ -738,7 +740,8 @@ class trade:
             m_nav = pd.merge(m_nav,benchmark_nav,left_index=True,right_index=True)
             m_nav = pd.merge(m_nav,alpha_nav1,left_index=True,right_index=True)
             m_nav = pd.merge(m_nav,alpha_nav2,left_index=True,right_index=True)
-            
+            performance.columns = ['策略','超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]
+            m_nav.columns = ['策略收益','%s收益'%benchmakr_name,'超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]    
         #保存到excel
         with pd.ExcelWriter("C:\\py_data\\textdata\\performance.xlsx") as writer:            
             performance.to_excel(writer,"策略表现")
@@ -767,6 +770,7 @@ if __name__ == "__main__":
     
     #asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 = trade_func.settle(buylist,"000001",'20170331')
     #performance,m_nav = trade_func.performance(asset,"000001")     
+    
 
     
         
