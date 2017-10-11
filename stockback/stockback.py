@@ -19,11 +19,11 @@ warnings.filterwarnings("ignore")
 而实际上最大仓位是7只，那么第一期同样投入100%资金，下一期若7只满足条件，则再重新分配资金。
 
 此回溯程序是先挑选出每一期符合条件的股票，然后再开始交易买入
-每一期股票buylist: 包含SecuCode,SecuAbbr,signal_rank,三个字段,index是日期格式
-其中，signal_rank为每一期股票的买入优先级,从小到大，rank越小，优先级越高
+每一期股票buylist: 包含SecuCode,SecuAbbr,signal_rank,三个字段,index是日期格式，若是weight_type!=None,则需要有
+weight字段，其中，signal_rank为每一期股票的买入优先级,从小到大，rank越小，优先级越高
 
-quoe:行情数据，至少包含cp,precp,vol,fq_cp[计算止损止盈用]字段
-1. 止盈、止损仅在调仓日进行判断，并不是每日判断
+quoe:行情数据，至少包含cp,precp,vol,fq_cp[计算止损止盈用]字段，
+1. 止盈、止损每日进行判断
 '''
  
 class trade:
@@ -42,8 +42,9 @@ class trade:
     gain_rtn=None
     
         
-    def __init__(self,datapath,unit,feeratio,init_cash,volratio,tradeprice,daily_limit,min_wait_buycash,buynumber,min_holddays,stop_type,loss_rtn=None,gain_rtn=None):
+    def __init__(self,datapath,unit,feeratio,init_cash,volratio,tradeprice,daily_limit,min_wait_buycash,buynumber,min_holddays,stop_type,weight_type=None,loss_rtn=None,gain_rtn=None):
         '''
+        
         unit:单位，默认100
         feeratio:手续费，默认千分之1.5
         init_cash:初始投入金额 单位元
@@ -54,10 +55,14 @@ class trade:
         min_wait_buycash:最小保留金额，小于这个金额不再新开仓买入，默认20000 
         buynumber：最大持仓数量
         min_holddays：单只股票最小持仓数量
+        stop_type: 'relative':相对模式，如个股票盈利10%，而基准盈利-10%，那么相对盈利20%，止盈止损位相对，其他为绝对止损........
+        weight_type: 每期权重方式，None默认等权重,否则需要buylist有"weight"字段
         loss_rtn: 止损收益率，如-0.1，代表个股亏损10%止损
         gain_rtn: 止盈收益率，如0.2，代表个股盈利20%止盈
-        stop_type: 'relative':相对模式，如个股票盈利10%，而基准盈利-10%，那么相对盈利20%，止盈止损位相对，其他为绝对止损........
+        -------------------------------------------------------------------------
+        一旦设定止盈止损，则即使最新一期调入有该股票，也将由于止盈止损而出局，即不买入！
         '''
+       
         self.datapath = datapath
         self.unit = unit
         self.feeratio = feeratio
@@ -69,6 +74,7 @@ class trade:
         self.buynumber = buynumber
         self.min_holddays = min_holddays
         self.stop_type = stop_type
+        self.weight_type = weight_type
         self.loss_rtn = loss_rtn
         self.gain_rtn = gain_rtn
     
@@ -282,7 +288,7 @@ class trade:
         day_sell_holdvol =  pd.concat([sell_holdvol,sell_quote[['vol','cp','precp']]],axis=1) 
         day_sell_holdvol['vol'] = day_sell_holdvol['vol'] * self.volratio
         day_sell_holdvol[0] = np.where(day_sell_holdvol['cp']<=(1-self.daily_limit)*day_sell_holdvol['precp'] + 0.01
-                                        ,0,day_sell_holdvol[0])  #跌停判断
+                                        ,0,day_sell_holdvol[0])  #跌停判断,跌停不卖出
         day_sell_holdvol = day_sell_holdvol.drop(labels=['cp','precp'],axis=1)
         day_sell_holdvol = day_sell_holdvol.min(axis=1)
         surplus_holdvol = sell_holdvol - day_sell_holdvol
@@ -460,7 +466,8 @@ class trade:
                     if day == session_timeindex.index.min():  
                         day_buylist['signal_rank'] = day_buylist['signal_rank'].rank(method='first')    
                         day_buylist = day_buylist[day_buylist['signal_rank']<=self.buynumber]
-                        day_buylist['weight'] = 1.0 / len(day_buylist)
+                        if self.weight_type = None:
+                            day_buylist['weight'] = 1.0 / len(day_buylist)
                         sell_stockvalue =  pd.Series(0)      
                         trade_fq_cp = day_buylist['fq_cp'] #记录复权成交价 
                         fq_cp = trade_fq_cp
@@ -523,7 +530,8 @@ class trade:
                         day_buylist['signal_rank'] = np.where(day_buylist.index.isin(holdvol.index)==True,0,day_buylist['signal_rank'])
                         day_buylist['signal_rank'] = day_buylist['signal_rank'].rank(method='first')    
                         day_buylist = day_buylist[day_buylist['signal_rank']<=self.buynumber]
-                        day_buylist['weight'] = 1.0 / day_buylist.count()[0]
+                        if self.weight_type = None:
+                            day_buylist['weight'] = 1.0 / day_buylist.count()[0]
                         #进行止盈止损操作,，仍在买入目标池中股票，计算当前的收益
                         keep_holdvol = holdvol[holdvol.index.isin(day_buylist.index)]
                         old_sell_holdvol = pd.DataFrame()
@@ -765,6 +773,7 @@ if __name__ == "__main__":
                     buynumber = 20,
                     min_holddays = 10,
                     stop_type = 'abs',
+                    weight_type = None,
                     loss_rtn = None,
                     gain_rtn=None)
     
