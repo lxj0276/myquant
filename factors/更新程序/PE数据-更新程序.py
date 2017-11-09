@@ -6,23 +6,28 @@ PE数据 周度
 """
 
 from factor0 import *
- 
-class PE_func(init_factor):
+
+class PE_func_update(init_factor):
     pass
 
 if __name__ == "__main__":
-    get = PE_func() #初始化
+    get = PE_func_update() #初始化
     ##--参数设置
     databasename = 'test'
     tablename = 'pe'
     cycle_type = 'm'  #timetype 转为周或者月数据
-    startdate = '20130101'
-    startdate1 = str(int(startdate)-10000) #提取财务数据时用
     
-    print('提取数据中...')
+     #获取数据库最后的更新日期--------------------------------
+    last_data = get.get_最近的数据(databasename,tablename)
+    startdate = last_data['TradingDay'].max()
+    startdate = datetime.datetime.strftime(startdate,'%Y%m%d')
+    startdate1 = str(int(startdate)-10000)
+    
+    
     listedstate = get.get_上市状态变更() #输出被退市和暂停上市的股票
     listedstate = listedstate.sort_values(['InnerCode','ChangeDate'])
-    info = get.get_info() #获取代码、简称、上市日期等数据
+    up_date = listedstate[listedstate['ChangeType']==1] #获取上市日期
+    info = get.get_info() #获取代码、简称等数据
   
     #从无到有处理因子---------------------------------------------
     TradingDay = get.get_交易日期(startdate)
@@ -80,24 +85,13 @@ if __name__ == "__main__":
     pe_week['pettm_cut'] = np.where(pd.isnull(pe_week['pettm_cut'])!=True, pe_week['pettm_cut'], None)
     pe_week['pe_float'] = np.where(pd.isnull(pe_week['pe_float'])!=True, pe_week['pe_float'], None)
     pe_week['pe_float_cut'] = np.where(pd.isnull(pe_week['pe_float_cut'])!=True, pe_week['pe_float'], None)
-    get.to_查错(pe_week,"C:/Users/dylan/Desktop/慧网工作/股票量化策略/多因子计算/因子纠错/pe查错V1.xlsx")
-    temp_profit.to_excel("C:/Users/dylan/Desktop/慧网工作/股票量化策略/多因子计算/因子纠错/ttm.xlsx")
     pe_week = pe_week[['TradingDay','SecuCode','pettm','pettm_cut','pe_float','pe_float_cut']]       
 
-
-    aa = pe_week[pd.isnull(pe_week['pe_float'])==True]
-    #-------创建表，并插入数据------------------------------------------------------------------
-    data_structure = "( id bigint  not null primary key AUTO_INCREMENT,\
-                        TradingDay datetime,   \
-                        SecuCode varchar(6),  \
-                        pettm double, \
-                        pettm_cut double,\
-                        pe_float double,\
-                        pe_float_cut double)"
-    names = "(TradingDay,SecuCode,pettm,pettm_cut,pe_float,pe_float_cut)"
     
-    get.create_newdata(databasename,tablename,data_structure) #创建表
-    get.insert_data(databasename,tablename,names,pe_week) #插入数据
+    #----删除数据中最后一天的数据，以防止该天的数据不是每周的最后一天------------------------------
+    names = "(TradingDay,SecuCode,pettm,pettm_cut,pe_float,pe_float_cut)"   
+    get.update_data(databasename,tablename,last_data) #删除最后一期数据，并且id自增
+    get.insert_data(databasename,tablename,names,pe_week) #插入更新数据
     
     
    
