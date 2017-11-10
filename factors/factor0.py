@@ -69,8 +69,17 @@ class init_factor:
         data2 = data.iloc[index]
         data2.to_excel(datapath)
     
-        
-        
+    def transto_None(self,data):
+        '''
+        处理data数据中包含nan、inf数据，转为None,以便mysql数据库能够认识
+        '''
+        columns = list(data.columns)
+        for i in range(2,len(columns)):
+            names = columns[i]
+            data[names] = np.where(pd.isnull(data[names])!=True, data[names], None)
+            data[names] = np.where(data[names]==np.inf, None,data[names])
+        return data
+     
     
     def get_行情(self,startdate,indicator=None,indicator1=None):
         '''
@@ -292,33 +301,6 @@ class init_factor:
                                                   data[indicator],np.nan))
         return data['单季值'].values
     
-    def get_衍生表(self,startdate,indicator1,indicator2=None,indicator3=None,indicator4=None,indicator5=None):
-        '''
-        公司衍生报表数据_新会计准则（新）数据 LC_FSDerivedData,最多可以同时提取5个指标
-        '''
-        sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, \
-                "+indicator1+" from  LC_FSDerivedData    where \
-                AccountingStandards = 1 and InfoPublDate>="+startdate+"" 
-        if indicator2 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, \
-                    "+indicator1+" ,"+indicator2+" from  LC_FSDerivedData    where \
-                    AccountingStandards = 1 and InfoPublDate>="+startdate+"" 
-        if  indicator3 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+" from  LC_FSDerivedData    where \
-                    AccountingStandards = 1 and InfoPublDate>="+startdate+"" 
-        if indicator4 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+" from  LC_FSDerivedData    where \
-                    AccountingStandards = 1 and InfoPublDate>="+startdate+"" 
-        if indicator5 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+","+indicator5+" from  LC_FSDerivedData    where \
-                    AccountingStandards = 1 and InfoPublDate>="+startdate+""   
-        
-        data = pd.read_sql(sql,con=self._dbengine)
-        return data
-    
     def get_财务表(self,sheetname,startdate,indicator1,indicator2=None,indicator3=None,indicator4=None,indicator5=None):
         '''
         sheetname:
@@ -333,19 +315,19 @@ class init_factor:
         if indicator2 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
                     "+indicator1+" ,"+indicator2+" from  "+sheetname+"    where \
-                    AccountingStandards = 1 and IfMerged=1 and IfAdjusted in (1,2)  and InfoPublDate>="+startdate+"" 
+                     IfMerged=1 and IfAdjusted in (1,2)  and InfoPublDate>="+startdate+"" 
         if indicator3 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+" from  "+sheetname+"    where \
-                    AccountingStandards = 1 and IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
+                      IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator4 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+" from  "+sheetname+"   where \
-                    AccountingStandards = 1 and IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
+                     IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator5 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+","+indicator5+" from "+sheetname+"   where \
-                    AccountingStandards = 1 and IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+""             
+                     IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+""             
         data = pd.read_sql(sql,con=self._dbengine)
         return data
     
@@ -359,23 +341,23 @@ class init_factor:
                     
         sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType,\
                 "+indicator1+" from  "+sheetname+"    where \
-                AccountingStandards = 1 and Mark in (1,2) and InfoPublDate>="+startdate+"" 
+                 Mark in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator2 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
                     "+indicator1+" ,"+indicator2+" from  "+sheetname+"    where \
-                    AccountingStandards = 1 and Mark in (1,2) and InfoPublDate>="+startdate+"" 
+                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator3 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+" from  "+sheetname+"    where \
-                    AccountingStandards = 1 and Mark in (1,2) and InfoPublDate>="+startdate+"" 
+                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator4 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+" from  "+sheetname+"   where \
-                    AccountingStandards = 1 and Mark in (1,2) and InfoPublDate>="+startdate+"" 
+                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
         if indicator5 is not None:
             sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
                     "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+","+indicator5+" from "+sheetname+"   where \
-                    AccountingStandards = 1 and Mark in (1,2) and InfoPublDate>="+startdate+""             
+                     Mark in (1,2) and InfoPublDate>="+startdate+""             
         data = pd.read_sql(sql,con=self._dbengine)
         return data
     
