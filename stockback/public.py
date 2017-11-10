@@ -8,10 +8,10 @@ get_交易日期：获取交易日期
 get_上市状态变更:获取上市公司的上市状态
 get_info:获取A股代码、innercode、companycode是公用的函数
 create_newdata:创建表
-！！！注意事项：
-finance_getinfo_rank这个函数中，由于对指标进行了填充，取最新值，因此指标未来不能做横向处理，
-比如中国平安20170331，非经常损益值为空，但我们取了上一期20161231或者20160930的值，
-这个时候计算扣非净利润，不能用20170331的净利润-本期非经常性损益，而是在finance_getinfo_rank前就要进行计算，请注意。
+1. 该数据用的是新会计准则，因此回溯时，不能从2007年之前开始，得从2008年之后开始 
+2. finance_getinfo_rank这个函数中，由于对指标进行了填充，取最新值，因此指标未来不能做横向处理，
+    比如中国平安20170331，非经常损益值为空，但我们取了上一期20161231或者20160930的值，
+    这个时候计算扣非净利润，不能用20170331的净利润-本期非经常性损益，而是在finance_getinfo_rank前就要进行计算，请注意。
 
 
 """
@@ -202,8 +202,10 @@ class public:
 #                ThirdIndustryName,FourthIndustryName,Standard,CancelDate from  LC_ExgIndustry where \
 #                Standard in "+standard+" "
         standard='(9,24)'
+        最终进行排序
         '''
-        industry = pd.read_hdf(self.datapath2+'\\info.h5','industry',where="Standard in "+standard+"")        
+        industry = pd.read_hdf(self.datapath2+'\\info.h5','industry',where="Standard in "+standard+"") 
+        industry = industry.sort_values(['CompanyCode','InfoPublDate'],ascending=True) #排序
         return industry
     
     
