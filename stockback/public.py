@@ -63,20 +63,6 @@ class public:
         data = data.drop(['%s_y'%indicator,'%s_x'%indicator],axis=1)
         return data
     
-    def get_同比(self,data,indicator):
-        '''
-        计算财务指标的同比,需要有EndDate、CompanyCode字段
-        '''
-        data['month'] = data['EndDate'].apply(lambda x:x.month)
-        data['year'] = data['EndDate'].apply(lambda x:x.year)
-        data['同比'] = np.where((data['CompanyCode']==data['CompanyCode'].shift(4))&
-                           (data['month']==data['month'].shift(4))&
-                           (data['year']==data['year'].shift(4)+1)&
-                           (data[indicator].shift(4)!=0),
-                           data[indicator]/data[indicator].shift(4)-1,np.nan)
-        return data['同比'].values
-    
-
     def finance_getinfo_rank(self,data,info,fill=False):
         '''
         财务数据的处理
@@ -144,6 +130,17 @@ class public:
         return temp_info
         
     
+    def get_同比(self,data,indicator):
+        '''
+        计算财务指标的同比,需要有EndDate、CompanyCode字段
+        '''
+        data['lastdate'] = data['EndDate'].apply(lambda x:datetime.datetime(x.year-1,x.month,x.day))
+        data['temp'] = data[indicator]
+        data = pd.merge(data,data[['EndDate','CompanyCode','temp']],
+                               left_on=['CompanyCode','lastdate'],right_on=['CompanyCode','EndDate'],how='left')        
+        data['同比'] = np.where(data['temp']!=0,data[indicator]/data['temp']-1,np.nan)
+        return data['同比'].values
+    
     def get_ttm(self,data,indicator):
         '''
         财务数据，当期数据计算该指标的TTM值
@@ -152,24 +149,18 @@ class public:
         data = data.sort_values(['CompanyCode','EndDate','InfoPublDate'])
         data = data.drop_duplicates(['CompanyCode','EndDate'],keep='last')
         indicator:需要计算的指标，如‘归属母公司的净利润’
-        data = temp_profit
-        indicator = 'NPParentCompanyOwners'
+        data = temp_OperatingRevenue
+        indicator = 'TotalOperatingRevenue'
         ''' 
-        data['month'] = data['EndDate'].apply(lambda x:x.month)
-        data['year'] = data['EndDate'].apply(lambda x:x.year)
-        
-        year_data = data[data['month'] ==12] #获取年度数据
-        year_data['year'] = year_data['year'].apply(lambda x:x+1)
-        year_data['temp'] = year_data[indicator]
-        data = pd.merge(data,year_data[['year','CompanyCode','temp']],
-                               on=['CompanyCode','year'],how='left')   
-        data['TTM'] = np.where((data['CompanyCode']==data['CompanyCode'].shift(4))
-                                                &(data['month']==data['month'].shift(4))&
-                                                (data['year']==data['year'].shift(4)+1)&
-                                                (data['month']!=12),
-                                                data[indicator]+data['temp']-data[indicator].shift(4),
-                                                np.where(data['month']==12,data[indicator],np.nan))
-        #data['%sTTM'%indicator] = np.where(pd.isnull(data['%sTTM'%indicator])==False,data['%sTTM'%indicator],None)
+        data['month'] = data['EndDate'].apply(lambda x:x.month)  
+        data['lastdate'] = data['EndDate'].apply(lambda x:datetime.datetime(x.year-1,x.month,x.day))
+        data['yeardate'] = data['EndDate'].apply(lambda x:datetime.datetime(x.year-1,12,31))
+        data['temp'] = data[indicator]
+        data = pd.merge(data,data[['EndDate','CompanyCode','temp']],
+                               left_on=['CompanyCode','yeardate'],right_on=['CompanyCode','EndDate'],how='left')        
+        data = pd.merge(data,data[['EndDate_x','CompanyCode','temp_x']],
+                               left_on=['CompanyCode','lastdate'],right_on=['CompanyCode','EndDate_x'],how='left')  
+        data['TTM'] = np.where(data['month']!=12,data[indicator]+data['temp_y']-data['temp_x_y'],data[indicator])
         return data['TTM'].values
     
     def get_单季值(self,data,indicator):
