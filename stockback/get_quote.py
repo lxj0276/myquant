@@ -127,7 +127,7 @@ class get_quote:
         startdate = datetime.datetime.strftime(startdate,"%Y%m%d")
         new_quote = func(startdate,enddate) #提取更新数据
         new_quote.to_hdf(self.datapath,'%s'%dataname,format='table',mode='r+',data_columns=new_quote.columns,append=True)
-        
+        print("%s更新完毕"%dataname)
         
     def get_ST(self):
         '''
@@ -208,15 +208,15 @@ class get_quote:
                     IfAdjusted in (1,2) "
         
         data = pd.read_sql(sql,con=self._dbengine1)
-        #data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='a',data_columns=data.columns)
+        data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=data.columns)
         print("%s提取完毕"%sheetname)
-        return data
 #        data.to_hdf("C:\\py_data\\datacenter\\test.h5",key='test',format='table',mode='a',data_columns=data.columns)
 #        aa  = pd.read_hdf("C:\\py_data\\datacenter\\test.h5",'test',columns=['AccountingStandards'])
         
     def update_财务股本表(self,sheetname):
         '''
         更新财务数据,不包括股本表
+        sheetname='LC_IncomeStatementAll'
         '''
         startdate = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',where="InfoPublDate>='20171030'",columns=['InfoPublDate'])
         startdate = datetime.datetime.strftime(startdate['InfoPublDate'].max() ,"%Y%m%d")
@@ -227,8 +227,7 @@ class get_quote:
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1\
                     and IfAdjusted in (1,2) and InfoPublDate>"+startdate+""            
-        data = pd.read_sql(sql,con=self._dbengine1)
-        data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='r+',data_columns=data.columns,append=True)
+        data.to_hdf(datapath2+'\\%s.h5',key='data',format='table',mode='r+',data_columns=olddata.columns)
         print("%s更新完毕"%sheetname)
         
     def get_industry(self):
@@ -252,10 +251,11 @@ if __name__ == '__main__':
     #当且仅当从头开始提取数据时运行，否则不运行,更新行情、指数及财务报表数据—------------------------
 #     get.new_data('equity_quote',get.get_equityquote) #提取股票行情
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
-#     get.get_财务表('LC_IncomeStatementAll')
-     #get.get_财务表('LC_CashFlowStatementAll')
-#     get.get_财务表('LC_QIncomeStatementNew')
-#     get.get_财务表('LC_QCashFlowStatementNew')
+     get.get_财务表('LC_BalanceSheetAll')
+     get.get_财务表('LC_IncomeStatementAll')
+     get.get_财务表('LC_CashFlowStatementAll')
+     get.get_财务表('LC_QIncomeStatementNew')
+     get.get_财务表('LC_QCashFlowStatementNew')
           
 
 #     indexquote2 = indexquote[indexquote['Sucucode']=='000001']
@@ -265,18 +265,19 @@ if __name__ == '__main__':
 #    indexquote3.to_hdf(datapath2,key='%s'%sheetname,format='table',mode='a',data_columns=indexquote3.columns)
 
      
-     #.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+    
      #get.get_bonus()
 
      
      #------更新财务、股本数据-----------------------------------------------------------------
-     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
-     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
-     get.update_财务股本表('LC_BalanceSheetAll')
-     get.update_财务股本表('LC_IncomeStatementAll')
-     get.update_财务股本表('LC_CashFlowStatementAll')
-     get.update_财务股本表('LC_QIncomeStatementNew')
-     get.update_财务股本表('LC_QCashFlowStatementNew')
+#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
+#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
+#     get.update_财务股本表('LC_BalanceSheetAll')
+#     get.update_财务股本表('LC_IncomeStatementAll')
+#     get.update_财务股本表('LC_CashFlowStatementAll')
+#     get.update_财务股本表('LC_QIncomeStatementNew')
+#     get.update_财务股本表('LC_QCashFlowStatementNew')
 
      
      
