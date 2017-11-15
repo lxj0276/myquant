@@ -99,6 +99,11 @@ class get_quote:
                  where a.SecuMarket in (83,90) and a.SecuCategory =1"
         bonus = pd.read_sql(sql,con=self._dbengine1)
         bonus = bonus.fillna(0) #以免在stockback使用时，由于有NaN导致的误差
+        #有些分红，年报和季报一起在同一天实施，如航发控制[000738.SZ]，2013-6-14日
+        bonus = bonus.groupby(['SecuCode','ExDiviDate']).sum()
+        bonus['SecuCode'] = pd.DataFrame(bonus.index)[0].apply(lambda x:x[0]).values
+        bonus['ExDiviDate'] = pd.DataFrame(bonus.index)[0].apply(lambda x:x[1]).values
+        bonus.index = range(len(bonus))
         bonus.to_hdf(self.datapath,key='bonus',format='table',mode='a',data_columns=bonus.columns)
        
     def new_data(self,dataname,func):
@@ -164,6 +169,12 @@ class get_quote:
         info = pd.read_sql(sql,con=self._dbengine1)
         return info
     
+    def get_解禁表(self):
+        sql = "select * from LC_SharesFloatingSchedule where CompanyCode in (SELECT CompanyCode from \
+                    secumain where  SecuMarket in (83,90) and SecuCategory=1 )"
+        lift = pd.read_sql(sql,con=self._dbengine1)
+        return lift
+    
     def get_股本表(self):
         sql = "select * from LC_ShareStru where CompanyCode in (SELECT CompanyCode from \
                     secumain where  SecuMarket in (83,90) and SecuCategory=1 )"
@@ -179,12 +190,14 @@ class get_quote:
         st = self.get_ST()
         LC_ShareStru = self.get_股本表() 
         industry = self.get_industry() #行业表
+        lift = self.get_解禁表()
         
         listedstate.to_hdf(self.datapath2+"\\info.h5",'listedstate',format='table',mode='a',data_columns=listedstate.columns)
         info.to_hdf(self.datapath2+"\\info.h5",'info',format='table',mode='a',data_columns=info.columns)
         suspend.to_hdf(self.datapath2+"\\info.h5",'suspend',format='table',mode='a',data_columns=suspend.columns)
         st.to_hdf(self.datapath2+"\\info.h5",'st',format='table',mode='a',data_columns=st.columns)
         LC_ShareStru.to_hdf(self.datapath2+"\\info.h5",'LC_ShareStru',format='table',mode='a',data_columns=LC_ShareStru.columns)
+        lift.to_hdf(self.datapath2+"\\info.h5",'lift',format='table',mode='a',data_columns=lift.columns)
         industry.to_hdf(self.datapath2+"\\info.h5",'industry',format='table',mode='a',data_columns=industry.columns)
         print('info相关数据更新完毕')
     #------------------------获取财报数据--------------------------------------------------------
@@ -251,11 +264,11 @@ if __name__ == '__main__':
     #当且仅当从头开始提取数据时运行，否则不运行,更新行情、指数及财务报表数据—------------------------
 #     get.new_data('equity_quote',get.get_equityquote) #提取股票行情
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
-     get.get_财务表('LC_BalanceSheetAll')
-     get.get_财务表('LC_IncomeStatementAll')
-     get.get_财务表('LC_CashFlowStatementAll')
-     get.get_财务表('LC_QIncomeStatementNew')
-     get.get_财务表('LC_QCashFlowStatementNew')
+#     get.get_财务表('LC_BalanceSheetAll')
+#     get.get_财务表('LC_IncomeStatementAll')
+#     get.get_财务表('LC_CashFlowStatementAll')
+#     get.get_财务表('LC_QIncomeStatementNew')
+#     get.get_财务表('LC_QCashFlowStatementNew')
           
 
 #     indexquote2 = indexquote[indexquote['Sucucode']=='000001']
@@ -270,7 +283,7 @@ if __name__ == '__main__':
 
      
      #------更新财务、股本数据-----------------------------------------------------------------
-#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
 #     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
 #     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
 #     get.update_财务股本表('LC_BalanceSheetAll')
