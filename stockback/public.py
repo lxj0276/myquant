@@ -86,16 +86,18 @@ class public:
     
     def get_常规数据(self):
          #获取上市日期\代码\简称等数据
-        info = pd.read_hdf(self.datapath,'info',columns=['InnerCode','SecuCode','CompanyCode','ListedDate'])
+        info = pd.read_hdf(self.datapath2+"\\info.h5",'info',columns=['InnerCode','SecuCode','CompanyCode','ListedDate'])
         #获取上市状态变更，如退市、暂停上市等数据
-        listedstate = pd.read_hdf(self.datapath,'listedstate')    
+        listedstate = pd.read_hdf(self.datapath2+"\\info.h5",'listedstate')    
         #获取ST情况
-        st = pd.read_hdf(self.datapath,'st')
+        st = pd.read_hdf(self.datapath2+"\\info.h5",'st')
         #获取停牌复牌表
-        suspend =  pd.read_hdf(self.datapath,'suspend',columns=['InnerCode','InfoPublDate','SuspendDate','ResumptionDate'])
-        return info,st,listedstate,suspend
+        suspend =  pd.read_hdf(self.datapath2+"\\info.h5",'suspend',columns=['InnerCode','InfoPublDate','SuspendDate','ResumptionDate'])
+        #h获取解禁数据
+        lift = pd.read_hdf(self.datapath2+"\\info.h5",'lift',columns=[['InnerCode','InitialInfoPublDate','StartDateForFloating','Proportion1']])
+        return info,st,listedstate,suspend,lift
     
-    def get_常规剔除(self,info,st,suspend,listedstate,date,days):
+    def get_常规剔除(self,info,st,suspend,listedstate,lift,date,days,dellift=False):
         '''
         info、st、suspend、listedstate分别为info数据、st数据、停复牌数据、上市状态变更数据
         date:当期的日期
@@ -123,10 +125,18 @@ class public:
         temp_listedstate = listedstate[date>=listedstate['ChangeDate']-datetime.timedelta(40)]
         temp_listedstate = temp_listedstate.drop_duplicates(['InnerCode'],keep='last')
         temp_listedstate = temp_listedstate[~(temp_listedstate['ChangeType'].isin((1,3)))] 
-        
+       
+        #最终排除
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_st['InnerCode'])]
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_suspend['InnerCode'])]
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_listedstate['InnerCode'])]
+        temp_info = temp_info[~temp_info['InnerCode'].isin(temp_listedstate['InnerCode'])]
+        if dellift==True:
+            #解禁,解禁前2个月，后40天，比例占流通股本超过8%的个股进行剔除
+            temp_lift = lift[(date>=lift['InitialInfoPublDate'])]
+            temp_lift = temp_lift[(date<=temp_lift['InitialInfoPublDate']+datetime.timedelta(40))&(date>=temp_lift['StartDateForFloating']-datetime.timedelta(60))]
+            temp_lift = temp_lift[temp_lift['Proportion1']>8]
+            temp_info = temp_info[~temp_info['InnerCode'].isin(temp_lift['InnerCode'])]
         return temp_info
         
     
@@ -138,7 +148,7 @@ class public:
         data['temp'] = data[indicator]
         data = pd.merge(data,data[['EndDate','CompanyCode','temp']],
                                left_on=['CompanyCode','lastdate'],right_on=['CompanyCode','EndDate'],how='left')        
-        data['同比'] = np.where(data['temp']!=0,data[indicator]/data['temp']-1,np.nan)
+        data['同比'] = np.where(data['temp_y']!=0,data[indicator]/data['temp_y']-1,np.nan)
         return data['同比'].values
     
     def get_ttm(self,data,indicator):
