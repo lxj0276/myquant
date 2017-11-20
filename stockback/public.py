@@ -47,21 +47,34 @@ class public:
         
     def 行业中性处理(self,data,indicator,industryname):
         '''
-        行业中性出来
+        行业中性化处理，采取中位数去极值法
         indicator:需要有industyrname名称，返回处理后的data值
+        data = temp_value
+        indicator = 'pb'
+        industryname = 'FirstIndustryName'
         '''
-        #data = temp_roe
-        #indicator ='PB'
-        #industryname = 'FirstIndustryName'
-        industry_median = data.groupby([industryname])[[indicator]].mean()
+        #中位数去极值法，进行极值处理
+        industry_median = data.groupby([industryname])[[indicator]].median()
         industry_median[industryname] = industry_median.index
-        industry_std = data.groupby([industryname])[[indicator]].std()
-        industry_std[industryname] = industry_std.index
         data = pd.merge(data,industry_median,on=industryname)
-        data = pd.merge(data,industry_std,on=industryname)        
-        data[indicator] =  (data['%s_x'%indicator] - data['%s_y'%indicator])/ data[indicator]
-        data = data.drop(['%s_y'%indicator,'%s_x'%indicator],axis=1)
-        return data
+        data['median'] =  abs(data['%s_x'%indicator] - data['%s_y'%indicator])
+        median = data.groupby([industryname])[['median']].median()
+        median[industryname] = median.index
+        data = pd.merge(data,median,on=industryname)
+
+        data['value_up'] = data['%s_y'%indicator] + 3*abs(data['median_y'] )
+        data['value_down'] = data['%s_y'%indicator] - 3*abs(data['median_y'] )
+        data['value'] = np.where(data['%s_x'%indicator]>data['value_up'],data['value_up'],
+                            np.where(data['%s_x'%indicator]<data['value_down'],data['value_down'],data['%s_x'%indicator]))
+        #进行标准化
+        mean = data.groupby([industryname])[['value']].mean()
+        mean[industryname] = mean.index
+        data = pd.merge(data,mean,on=industryname)
+        std = data.groupby([industryname])[['value_x']].std()
+        std[industryname] = std.index
+        data = pd.merge(data,std,on=industryname)
+        data['value2'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']             
+        return data['value2'].values
     
     def finance_getinfo_rank(self,data,info,fill=False):
         '''
@@ -151,6 +164,38 @@ class public:
         data['同比'] = np.where(data['temp_y']!=0,data[indicator]/data['temp_y']-1,np.nan)
         return data['同比'].values
     
+    def get_环比(self,data,indicator):
+        '''
+        计算财务指标环比，需要有EndDate、CompanyCode字段
+        只能计算单季度值，或者TTM值
+        data = temp_OperatingRevenue
+        indicator = '营业收入TTM'
+        '''
+        data['month'] = data['EndDate'].apply(lambda x:x.month)
+        data['predate'] = np.where(data['month']==3,data['EndDate'].apply(lambda x:datetime.datetime(x.year-1,12,31)),
+                            np.where(data['month']==6,data['EndDate'].apply(lambda x:datetime.datetime(x.year,3,31)),
+                                np.where(data['month']==9,data['EndDate'].apply(lambda x:datetime.datetime(x.year,6,30)),
+                                         data['EndDate'].apply(lambda x:datetime.datetime(x.year,9,30)))))
+        data['temp'] = data[indicator]
+        data = pd.merge(data,data[['CompanyCode','EndDate','temp']],left_on=['predate','CompanyCode'],
+                                right_on = ['EndDate','CompanyCode'],how='left')
+        data['环比'] = np.where(data['temp_y']!=0,data[indicator]/data['temp_y']-1,np.nan)
+        return data['环比'].values
+    
+    def get_N年复合增长率(self,data,indicator,N):
+        '''
+        计算财务指标的同比,需要有EndDate、CompanyCode字段
+        n:几年
+        ntype:类型，复合还是算绝对
+        n=3
+        '''
+        data['lastdate'] = data['EndDate'].apply(lambda x:datetime.datetime(x.year-N,x.month,x.day))
+        data['temp'] = data[indicator]
+        data = pd.merge(data,data[['EndDate','CompanyCode','temp']],
+                               left_on=['CompanyCode','lastdate'],right_on=['CompanyCode','EndDate'],how='left')        
+        data['增长率'] = np.where(data['temp_y']!=0,(data[indicator]/abs(data['temp_y']))**(1/N)-1,np.nan)
+        return data['增长率'].values 
+    
     def get_ttm(self,data,indicator):
         '''
         财务数据，当期数据计算该指标的TTM值
@@ -159,7 +204,7 @@ class public:
         data = data.sort_values(['CompanyCode','EndDate','InfoPublDate'])
         data = data.drop_duplicates(['CompanyCode','EndDate'],keep='last')
         indicator:需要计算的指标，如‘归属母公司的净利润’
-        data = temp_OperatingRevenue
+        data = temp_profit
         indicator = 'TotalOperatingRevenue'
         ''' 
         data['month'] = data['EndDate'].apply(lambda x:x.month)  
@@ -183,14 +228,16 @@ class public:
         indicator:需要计算的指标，如‘归属母公司的净利润’
         ''' 
         data['month'] = data['EndDate'].apply(lambda x:x.month)
-        data['year'] = data['EndDate'].apply(lambda x:x.year)
-        data['单季值'] = np.where((data['CompanyCode']==data['CompanyCode'].shift(1))
-                                                &(data['month']==data['month'].shift(1)+3)&
-                                                (data['year']==data['year'].shift(1))&
-                                                ((data['month']==6)|(data['month']==9)),
-                                                data[indicator]-data[indicator].shift(1),
-                                                 np.where( ((data['month']==3)|(data['month']==12)),
-                                                  data[indicator],np.nan))
+        data['predate'] = np.where(data['month']==3,data['EndDate'].apply(lambda x:datetime.datetime(x.year-1,12,31)),
+                            np.where(data['month']==6,data['EndDate'].apply(lambda x:datetime.datetime(x.year,3,31)),
+                                np.where(data['month']==9,data['EndDate'].apply(lambda x:datetime.datetime(x.year,6,30)),
+                                         data['EndDate'].apply(lambda x:datetime.datetime(x.year,9,30)))))
+        
+        data['temp'] = data[indicator]
+        data = pd.merge(data,data[['CompanyCode','EndDate','temp']],left_on=['predate','CompanyCode'],
+                                right_on = ['EndDate','CompanyCode'],how='left')
+        data['单季值'] = np.where(((data['month']==3)|(data['month']==12)),data[indicator],
+                            data[indicator]-data['temp_y'])
         return data['单季值'].values
 
         
@@ -258,6 +305,7 @@ class public:
         for i in range(len(time0)):
             date = time0.iloc[i]['TradingDay']
             data = buylist0[buylist0['TradingDay']==date]
+            data = data.dropna(how='any',axis=0)
             rank_ic = data[[factor,'next_rtn']].rank().corr().ix[0][1]
             init_ic = data[[factor,'next_rtn']].corr().ix[0][1]
             corr = corr.append(pd.DataFrame([[date,init_ic,rank_ic]]))
