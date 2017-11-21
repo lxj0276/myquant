@@ -50,17 +50,18 @@ class public:
         行业中性化处理，采取中位数去极值法
         indicator:需要有industyrname名称，返回处理后的data值
         data = temp_value
-        indicator = 'pb'
+        indicator = '单季销售毛利率同比'
         industryname = 'FirstIndustryName'
         '''
+        aa = data[data['SecuCode']=='600234']
         #中位数去极值法，进行极值处理
         industry_median = data.groupby([industryname])[[indicator]].median()
         industry_median[industryname] = industry_median.index
-        data = pd.merge(data,industry_median,on=industryname)
+        data = pd.merge(data,industry_median,on=industryname,how='left')
         data['median'] =  abs(data['%s_x'%indicator] - data['%s_y'%indicator])
         median = data.groupby([industryname])[['median']].median()
         median[industryname] = median.index
-        data = pd.merge(data,median,on=industryname)
+        data = pd.merge(data,median,on=industryname,how='left')
 
         data['value_up'] = data['%s_y'%indicator] + 3*abs(data['median_y'] )
         data['value_down'] = data['%s_y'%indicator] - 3*abs(data['median_y'] )
@@ -69,10 +70,10 @@ class public:
         #进行标准化
         mean = data.groupby([industryname])[['value']].mean()
         mean[industryname] = mean.index
-        data = pd.merge(data,mean,on=industryname)
+        data = pd.merge(data,mean,on=industryname,how='left')
         std = data.groupby([industryname])[['value_x']].std()
         std[industryname] = std.index
-        data = pd.merge(data,std,on=industryname)
+        data = pd.merge(data,std,on=industryname,how='left')
         data['value2'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']             
         return data['value2'].values
     
@@ -161,7 +162,7 @@ class public:
         data['temp'] = data[indicator]
         data = pd.merge(data,data[['EndDate','CompanyCode','temp']],
                                left_on=['CompanyCode','lastdate'],right_on=['CompanyCode','EndDate'],how='left')        
-        data['同比'] = np.where(data['temp_y']!=0,data[indicator]/data['temp_y']-1,np.nan)
+        data['同比'] = np.where(data['temp_y']!=0,(data[indicator]-data['temp_y'])/abs(data['temp_y']),np.nan)
         return data['同比'].values
     
     def get_环比(self,data,indicator):
@@ -179,7 +180,7 @@ class public:
         data['temp'] = data[indicator]
         data = pd.merge(data,data[['CompanyCode','EndDate','temp']],left_on=['predate','CompanyCode'],
                                 right_on = ['EndDate','CompanyCode'],how='left')
-        data['环比'] = np.where(data['temp_y']!=0,data[indicator]/data['temp_y']-1,np.nan)
+        data['环比'] = np.where(data['temp_y']!=0,(data[indicator]-data['temp_y'])/abs(data['temp_y']),np.nan)
         return data['环比'].values
     
     def get_N年复合增长率(self,data,indicator,N):
