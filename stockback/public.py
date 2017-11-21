@@ -299,6 +299,8 @@ class public:
         '''
         计算IC即ICrank值
         buylist0 dataframe 有有TradingDay、next_rtn、因子值数据
+        buylist0 = buylist9
+        factor = '1个月动量'
         '''
         #factor = '总市值'
         corr = pd.DataFrame()
@@ -306,12 +308,12 @@ class public:
         for i in range(len(time0)):
             date = time0.iloc[i]['TradingDay']
             data = buylist0[buylist0['TradingDay']==date]
-            data = data.dropna(how='any',axis=0)
+            data = data.dropna(subset=[factor],how='any',axis=0)
             rank_ic = data[[factor,'next_rtn']].rank().corr().ix[0][1]
             init_ic = data[[factor,'next_rtn']].corr().ix[0][1]
             corr = corr.append(pd.DataFrame([[date,init_ic,rank_ic]]))
         corr = pd.DataFrame([[date,corr.mean()[1],corr.mean()[2]]]).append(corr)   
-        return corr.iloc
+        return corr
         
         
         
