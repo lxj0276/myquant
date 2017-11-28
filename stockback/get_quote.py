@@ -251,6 +251,47 @@ class get_quote:
                 Standard in (3,9,24,19)"
         industry = pd.read_sql(sql,con=self._dbengine1)
         return industry
+    
+    def get_指数成分股(self):
+        '''
+        获取指数成分股,获取get_indexquote中的指数成分股信息
+        '''
+        sql1 = "select b.SecuCode as Index_SecuCode,b.SecuAbbr,a.IndexCode,b.CompanyCode,a.pubdate as ListedDate from LC_IndexBasicInfo as a\
+                inner join (select * from secumain where secucategory in (4) and secumarket in (83,90) and listedstate=1)as b\
+                on a.IndexCode=b.InnerCode where (IndexType in (10,47) or (IndexType=30 and industrystandard in (3,9,24)))"
+        index = pd.read_sql(sql1,con=self._dbengine1)
+        indexcode = str(tuple(index['IndexCode']))
+        sql2 = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
+                 IndexCode in "+indexcode+" "
+        constituent = pd.read_sql(sql2,con=self._dbengine1)
+        constituent = pd.merge(constituent,index[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
+        constituent.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='w',data_columns=constituent.columns)
+        print("指数成分股提取完毕....")
+    
+    def update_指数成分股(self):
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where="EndDate>'20171030'",columns=['IndexCode','EndDate','Index_Secucode'])
+        startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
+        indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
+        sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
+                EndDate>"+startdate+" and IndexCode in "+indexcode+""
+        newdata = pd.read_sql(sql,con=self._dbengine1)
+        newdata = pd.merge(newdata,data[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
+        newdata.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='r+',data_columns=newdata.columns)
+        print("指数成分股更新完毕....") 
+        
+        
+    
+#    def get_业绩预告(self,sheetname):
+#        '''
+#        获取原始财务报表数据，从无到有，
+#        sheetnam：LC_PerformanceLetters
+#        '''  
+#        sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1 and\
+#                    IfAdjusted in (1,2) "
+#        
+#        data = pd.read_sql(sql,con=self._dbengine1)
+#        data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=data.columns)
+#        print("%s提取完毕"%sheetname)
        
         
     
@@ -264,6 +305,11 @@ if __name__ == '__main__':
     #当且仅当从头开始提取数据时运行，否则不运行,更新行情、指数及财务报表数据—------------------------
 #     get.new_data('equity_quote',get.get_equityquote) #提取股票行情
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
+     get.get_指数成分股()
+     
+#     get.update_指数成分股()   
+#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
+#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
 #     get.get_财务表('LC_BalanceSheetAll')
 #     get.get_财务表('LC_IncomeStatementAll')
 #     get.get_财务表('LC_CashFlowStatementAll')
@@ -279,13 +325,12 @@ if __name__ == '__main__':
 
      
     
-     #get.get_bonus()
-
+#     get.get_bonus()
+#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
      
      #------更新财务、股本数据-----------------------------------------------------------------
-     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
-#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
-#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
+    
+   
 #     get.update_财务股本表('LC_BalanceSheetAll')
 #     get.update_财务股本表('LC_IncomeStatementAll')
 #     get.update_财务股本表('LC_CashFlowStatementAll')
