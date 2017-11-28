@@ -257,6 +257,14 @@ class public:
         industry = industry.sort_values(['CompanyCode','InfoPublDate'],ascending=True) #排序
         return industry
     
+    def get_指数成分股(self,Index_SecuCode):
+        '''
+        指数成分股，Index_SecuCode为指数的代码
+        '''
+        constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data',where="Index_SecuCode in "+Index_SecuCode+"") 
+        constituent = constituent.sort_values(['EndDate','Index_SecuCode'],ascending=True) #排序
+        return constituent
+    
     
     def get_财务股本表(self,sheetname,startdate,columns=[]):
         '''
@@ -312,8 +320,9 @@ class public:
             rank_ic = data[[factor,'next_rtn']].rank().corr().ix[0][1]
             init_ic = data[[factor,'next_rtn']].corr().ix[0][1]
             corr = corr.append(pd.DataFrame([[date,init_ic,rank_ic]]))
-        corr = pd.DataFrame([[date,corr.mean()[1],corr.mean()[2]]]).append(corr)   
-        return corr
+        corr1 = pd.DataFrame([[date,corr.mean()[1],corr.mean()[2]]]).append(corr)   
+        corr2 = pd.DataFrame([[date,corr.mean()[1]/corr.std()[1],corr.mean()[2]/corr.std()[2]]]).append(corr1)   
+        return corr2
         
         
         
