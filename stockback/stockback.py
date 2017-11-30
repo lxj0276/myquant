@@ -633,13 +633,13 @@ class trade:
 
         tradedetail0 = pd.merge(name_info,tradedetail0,right_index=True,left_on='SecuCode',how='right')      
         
-        
-        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
-            asset.to_excel(writer,u'asset')           
-            sell_holdvol.to_excel(writer,'待卖出股票情况')           
-            sell_holddays0.to_excel(writer,'股票持仓天数统计')
-            tradedetail0.to_excel(writer,"每日成交明细")
-            holdvol.to_excel(writer,"每日持仓明细")
+        #保存成交明细到excel
+#        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
+#            asset.to_excel(writer,u'asset')           
+#            sell_holdvol.to_excel(writer,'待卖出股票情况')           
+#            sell_holddays0.to_excel(writer,'股票持仓天数统计')
+#            tradedetail0.to_excel(writer,"每日成交明细")
+#            holdvol.to_excel(writer,"每日持仓明细")
         
         return asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 
     
