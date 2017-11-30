@@ -54,7 +54,13 @@ class init_factor:
                            password='jydb',
                            charset='gbk')
         self.datapath  = "C:\\py_data\\datacenter\\quote.h5"
-        
+ 
+
+
+
+
+
+ 
 
 #    def __del__(self):
 #        self._dbengine.close()
