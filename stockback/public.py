@@ -44,8 +44,28 @@ class public:
                            charset='gbk')
         self.datapath  = "C:\\py_data\\datacenter\\quote.h5"   
         self.datapath2  = "C:\\py_data\\datacenter"   
+    
+    def 秩标准化(self,data,indicator,inudstryname=None):
+        '''
+        标准化，
+        inudstryname：非空时，行业内秩标准化
+        data = temp_value
+        indicator = 'pb'
+        '''
+        data['value'] = data[indicator].rank(pct=True)
+        data['value'] = (data['value']- data['value'].mean())/ data['value'].std()
+        if inudstryname is not None:
+            data['value'] = data.groupby([industryname])[indicator].rank(pct=True)
+            mean = data.groupby([industryname])[['value']].mean()
+            mean[industryname] = mean.index
+            data = pd.merge(data,mean,on=industryname,how='left')
+            std = data.groupby([industryname])[['value_x']].std()
+            std[industryname] = std.index
+            data = pd.merge(data,std,on=industryname,how='left')
+            data['value'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']   
+        return data['value'].values
         
-    def 行业中性处理(self,data,indicator,industryname):
+    def z_score标准化(self,data,indicator,industryname):
         '''
         行业中性化处理，采取中位数去极值法
         indicator:需要有industyrname名称，返回处理后的data值
@@ -53,28 +73,36 @@ class public:
         indicator = '单季销售毛利率同比'
         industryname = 'FirstIndustryName'
         '''
-        aa = data[data['SecuCode']=='600234']
-        #中位数去极值法，进行极值处理
-        industry_median = data.groupby([industryname])[[indicator]].median()
-        industry_median[industryname] = industry_median.index
-        data = pd.merge(data,industry_median,on=industryname,how='left')
-        data['median'] =  abs(data['%s_x'%indicator] - data['%s_y'%indicator])
-        median = data.groupby([industryname])[['median']].median()
-        median[industryname] = median.index
-        data = pd.merge(data,median,on=industryname,how='left')
-
-        data['value_up'] = data['%s_y'%indicator] + 3*abs(data['median_y'] )
-        data['value_down'] = data['%s_y'%indicator] - 3*abs(data['median_y'] )
-        data['value'] = np.where(data['%s_x'%indicator]>data['value_up'],data['value_up'],
-                            np.where(data['%s_x'%indicator]<data['value_down'],data['value_down'],data['%s_x'%indicator]))
-        #进行标准化
-        mean = data.groupby([industryname])[['value']].mean()
-        mean[industryname] = mean.index
-        data = pd.merge(data,mean,on=industryname,how='left')
-        std = data.groupby([industryname])[['value_x']].std()
-        std[industryname] = std.index
-        data = pd.merge(data,std,on=industryname,how='left')
-        data['value2'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']             
+        #中位数取极值法
+        median = abs(data[indicator] - data[indicator].median()).median()
+        data['value'] = np.where(data[indicator]>data[indicator] + 5*median,data[indicator] + 5*median,
+                            np.where(data[indicator] -5*median,data[indicator] -5*median,data[indicator]))
+        #标准化处理
+        data['value2'] = (data['value'] -data['value'].mean()) / data['value'].std()
+        
+        #行业内Z_Score处理
+        if industryname is not None:
+            #中位数去极值法，进行极值处理
+            industry_median = data.groupby([industryname])[[indicator]].median()
+            industry_median[industryname] = industry_median.index
+            data = pd.merge(data,industry_median,on=industryname,how='left')
+            data['median'] =  abs(data['%s_x'%indicator] - data['%s_y'%indicator])
+            median = data.groupby([industryname])[['median']].median()
+            median[industryname] = median.index
+            data = pd.merge(data,median,on=industryname,how='left')
+    
+            data['value_up'] = data['%s_y'%indicator] + 5*abs(data['median_y'] )
+            data['value_down'] = data['%s_y'%indicator] - 5*abs(data['median_y'] )
+            data['value'] = np.where(data['%s_x'%indicator]>data['value_up'],data['value_up'],
+                                np.where(data['%s_x'%indicator]<data['value_down'],data['value_down'],data['%s_x'%indicator]))
+            #进行标准化
+            mean = data.groupby([industryname])[['value']].mean()
+            mean[industryname] = mean.index
+            data = pd.merge(data,mean,on=industryname,how='left')
+            std = data.groupby([industryname])[['value_x']].std()
+            std[industryname] = std.index
+            data = pd.merge(data,std,on=industryname,how='left')
+            data['value2'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']             
         return data['value2'].values
     
     def finance_getinfo_rank(self,data,info,fill=False):
@@ -111,7 +139,7 @@ class public:
         lift = pd.read_hdf(self.datapath2+"\\info.h5",'lift',columns=[['InnerCode','InitialInfoPublDate','StartDateForFloating','Proportion1']])
         return info,st,listedstate,suspend,lift
     
-    def get_常规剔除(self,info,st,suspend,listedstate,lift,date,days,dellift=False):
+    def get_常规剔除(self,date,info,st,suspend,listedstate,days):
         '''
         info、st、suspend、listedstate分别为info数据、st数据、停复牌数据、上市状态变更数据
         date:当期的日期
@@ -125,7 +153,7 @@ class public:
         由于聚源的停牌复盘表没有保存停牌复盘的公告日期，因此，统一采用日期变更日前40日即剔除该标的，
         有误差，但目前只能采取该方案
         '''
-        #上市日期大于1年,
+        #上市日期大于days天，如60天
         temp_info =info[date>=info['ListedDate']+datetime.timedelta(days)] 
         #非ST、*ST、暂停上市、退市整理、高风险预警等股票
         temp_st = st[(date>=st['InfoPublDate'])]
@@ -145,7 +173,14 @@ class public:
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_suspend['InnerCode'])]
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_listedstate['InnerCode'])]
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_listedstate['InnerCode'])]
-        if dellift==True:
+        return temp_info
+    
+    def get_非常规剔除(self,date,info,lift=None):
+        '''
+        info为常规剔除后的标的池
+        '''
+        temp_info = info
+        if lift is not None:
             #解禁,解禁前2个月，后40天，比例占流通股本超过8%的个股进行剔除
             temp_lift = lift[(date>=lift['InitialInfoPublDate'])]
             temp_lift = temp_lift[(date<=temp_lift['InitialInfoPublDate']+datetime.timedelta(40))&(date>=temp_lift['StartDateForFloating']-datetime.timedelta(60))]
@@ -261,6 +296,7 @@ class public:
         '''
         指数成分股，Index_SecuCode为指数的代码
         '''
+        Index_SecuCode = str(tuple(Index_SecuCode))
         constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data',where="Index_SecuCode in "+Index_SecuCode+"") 
         constituent = constituent.sort_values(['EndDate','Index_SecuCode'],ascending=True) #排序
         return constituent
