@@ -142,22 +142,21 @@ class risk:
     
     def get_高管增减持(self,startdate):
         sql = "select b.SecuCode,b.SecuAbbr,a. AlternationDate as 变动日期,\
-                a.ReportDate as 填报日期,a.LeaderName as 姓名, a.PositionDesc as 职务,a.ConnectionDesc\
-                as 关系, a.StockSumChanging as 变动股数,a.AvgPrice,c.totalmv/d.closeprice\
-                as 总股本,c.NegotiableMV/d.closeprice as 流通股本,a.ChangeProportion as 变动比例,\
-                a.AlternationReasonDesc as 变动原因,e.ClosePrice/a.AvgPrice-1 as 盈亏比例\
+                a.ReportDate as 公告日期,a.LeaderName as 姓名, a.PositionDesc as 职务,a.ConnectionDesc\
+                as 关系, a.StockSumChanging as 变动股数,\
+                (select Ashares from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.AlternationDate>=p.InfoPublDate and a.AlternationDate>=p.EndDate\
+                order by p.enddate desc limit 1) as A股股本,(select AFloats from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.AlternationDate>=p.InfoPublDate and a.AlternationDate>=p.EndDate\
+                order by p.enddate desc limit 1) as 流通股本，\
+                ,a.ChangeProportion as 变动比例,e.ClosePrice/a.AvgPrice-1 as 盈亏比例\
                 from LC_LeaderStockAlter a\
                 INNER JOIN (SELECT * FROM secumain where SecuCategory=1 AND\
                 SecuMarket in (83,90) and ListedState=1) as b on \
                 a.companycode=b.companycode and AlternationReason in(11,12,23)\
-                left join LC_DIndicesForValuation c on a.innercode=c.innercode \
-                and a.AlternationDate = c.TradingDay\
-                left join QT_DailyQuote d on a.innercode=d.innercode\
-                and a.AlternationDate = d.TradingDay\
                 left join QT_DailyQuote e on a.innercode=e.innercode and e.TradingDay=\
                 (select max(TradingDay) from qt_dailyquote where innercode=3)\
-                where reportdate >STR_TO_DATE("+startdate+",'%Y%m%d') order by\
-                reportdate desc"
+                where reportdate >"+startdate+" order by reportdate desc"
         holder = pd.read_sql(sql,con=self._dbengine1)
         return holder
     
