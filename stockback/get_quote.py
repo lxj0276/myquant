@@ -211,11 +211,13 @@ class get_quote:
         4. 单季利润表_新会计准则 LC_QIncomeStatementNew
         5. 单季现金流量表_新会计准则 LC_QCashFlowStatementNew
         6. 公司股本结构变动 LC_ShareStru
+        7. 公司衍生报表数据_新会计准则（新） LC_FSDerivedData 备注：该表中涉及TTM的数据计算有问题，不用
         sheetname='LC_BalanceSheetAll'
         '''  
         if sheetname=='LC_QIncomeStatementNew' or  sheetname=='LC_QCashFlowStatementNew':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and Mark in (1,2)"
-       
+        elif sheetname=='LC_FSDerivedData':
+            sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfAdjusted in (1,2) "
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1 and\
                     IfAdjusted in (1,2) "
@@ -237,6 +239,7 @@ class get_quote:
         if sheetname=='LC_QIncomeStatementNew' or  sheetname=='LC_QCashFlowStatementNew':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and Mark in (1,2) \
                     and InfoPublDate>"+startdate+""
+       
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1\
                     and IfAdjusted in (1,2) and InfoPublDate>"+startdate+""            
@@ -269,15 +272,82 @@ class get_quote:
         print("指数成分股提取完毕....")
     
     def update_指数成分股(self):
-        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where="EndDate>'20171030'",columns=['IndexCode','EndDate','Index_Secucode'])
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where="EndDate>'20171030'",columns=['IndexCode','EndDate','Index_SecuCode'])
         startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
         indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
         sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
                 EndDate>"+startdate+" and IndexCode in "+indexcode+""
         newdata = pd.read_sql(sql,con=self._dbengine1)
+        
         newdata = pd.merge(newdata,data[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
         newdata.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='r+',data_columns=newdata.columns)
         print("指数成分股更新完毕....") 
+    
+    def 产业资本增减持(self):
+        '''
+        获取历史产业资本增减持数据
+        '''
+        sql = "select b.SecuCode,b.SecuAbbr,a.CompanyCode,a.AlternationDate as TradingDay,\
+                a.ReportDate as InfoPublDate,a.LeaderName as 姓名, a.PositionDesc as 职务,a.ConnectionDesc\
+                as 关系, a.StockSumChanging as 变动股数,a.AvgPrice as 变动价格,\
+                (select Ashares from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.AlternationDate>=p.InfoPublDate and a.AlternationDate>=p.EndDate\
+                order by p.enddate desc limit 1) as A股股本,(select AFloats from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.AlternationDate>=p.InfoPublDate and a.AlternationDate>=p.EndDate\
+                order by p.enddate desc limit 1) as 流通股本 from LC_LeaderStockAlter a\
+                INNER JOIN (SELECT * FROM secumain where SecuCategory=1 AND\
+                SecuMarket in (83,90) and ListedState=1) as b on \
+                a.companycode=b.companycode and AlternationReason in(11,12,23)"
+       
+        sql = "select b.SecuCode,b.SecuAbbr,a.CompanyCode,a.InfoPublDate,a.TranDate as TradingDay,\
+                a.TransfererName,a.InfoSource,a.InvolvedSum as 变动股数,a.DealPrice as 变动价格,a.DealTurnover ,\
+                a.TranMode,a.ReceiverName as 姓名,(select Ashares from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.TranDate>=p.InfoPublDate and a.TranDate>=p.EndDate\
+                order by p.enddate desc limit 1) as A股股本,(select AFloats from LC_ShareStru as p where \
+                p.CompanyCode=a.CompanyCode and a.TranDate>=p.InfoPublDate and a.TranDate>=p.EndDate\
+                order by p.enddate desc limit 1) as 流通股本,c.ClosePrice as cp from LC_ShareTransfer a\
+                INNER JOIN (SELECT * FROM secumain where SecuCategory=1 AND\
+                SecuMarket in (83,90) and ListedState=1) as b on  a.companycode=b.companycode \
+                INNER JOIN QT_DailyQuote c on a.innercode=c.innercode and a.TranDate=c.TradingDay\
+                where TranShareType=5 and  TranMode in (5,8,12,51,53,55,56)"
+        data1 = pd.read_sql(sql,con=self._dbengine1)
+        data2 = pd.read_sql(sql,con=self._dbengine1)
+        #数据清洗
+        temp_data = data2[data2['TranMode']==55]
+        data11 = pd.merge(data1,temp_data[['SecuCode','TradingDay','姓名','TranMode']],how='left')
+        data11 = data11[data11['TranMode']!=55] #删除高管增减持中的重复数据，因为股东增减持数据质量更高
+        data11['DealTurnover'] =  data11['变动股数']* data11['变动价格']/100000000
+        data11 = data11[['SecuCode','CompanyCode','InfoPublDate','TradingDay','变动股数','DealTurnover','流通股本']]
+        
+        #处理股东增减持价格为空的问题，用当日收盘价替代
+        data2['变动价格'] = np.where(pd.isnull(data2['变动价格'])==True, data2['cp'],data2['变动价格'])
+        data2['变动股数'] = np.where(pd.isnull(data2['TransfererName'])==True,data2['变动股数'],-data2['变动股数'])
+        data2['DealTurnover'] = np.where(pd.isnull(data2['TransfererName'])==True,data2['DealTurnover']/100000000,-data2['DealTurnover']/100000000)
+        data2['DealTurnover'] = np.where(pd.isnull(data2['DealTurnover'])==True,data2['变动股数']*data2['变动价格']/100000000,data2['DealTurnover'])
+        #data2['变动占流通市值比'] =  100*data2['变动股数']/ data2['流通股本']
+        data22 = data2[['SecuCode','CompanyCode','InfoPublDate','TradingDay','变动股数','DealTurnover','流通股本']]
+        #董监高+股东增减持数据合并
+        data = data11.append(data22)
+        data['净增持比例'] = 100*data['变动股数']/data['流通股本']
+        #获取交易日期
+        #data3['TradingDay'] = data3['公告日期']
+        date = data[['TradingDay']].drop_duplicates()
+        date = date.sort_values(['TradingDay'])
+        date.index = range(len(date))
+        cyzb = pd.DataFrame()
+        for i in  range(len(date)):
+            time = date['TradingDay'][i]
+            pretime = time-datetime.timedelta(30)
+
+            temp_data = data[data['InfoPublDate']<=time]
+            temp_data = temp_data[(temp_data['TradingDay']>=pretime)&(temp_data['TradingDay']<=time)]
+            single = temp_data.groupby(['SecuCode'])[['净增持比例','DealTurnover']].sum()
+            single['TradingDay'] = time
+            cyzb = cyzb.append(single)
+        cyzb['SecuCode'] = cyzb.index
+        cyzb = cyzb.drop_duplicates(['SecuCode','净增持比例','DealTurnover'])
+        cyzb.to_hdf(self.datapath2+'\\risk.h5',key='cyzb',format='table',mode='w',data_columns=cyzb.columns)
+        print("产业资本增减持数据更新完毕....") 
         
         
     
@@ -307,26 +377,23 @@ if __name__ == '__main__':
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
      get.get_指数成分股()
      
-#     get.update_指数成分股()   
-#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
-#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
-#     get.get_财务表('LC_BalanceSheetAll')
-#     get.get_财务表('LC_IncomeStatementAll')
-#     get.get_财务表('LC_CashFlowStatementAll')
-#     get.get_财务表('LC_QIncomeStatementNew')
-#     get.get_财务表('LC_QCashFlowStatementNew')
+     #get.update_指数成分股()   
+     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
+     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
+     get.get_财务表('LC_BalanceSheetAll')
+     get.get_财务表('LC_IncomeStatementAll')
+     get.get_财务表('LC_CashFlowStatementAll')
+     get.get_财务表('LC_QIncomeStatementNew')
+     get.get_财务表('LC_QCashFlowStatementNew')
+     get.get_财务表('LC_FSDerivedData')
           
 
-#     indexquote2 = indexquote[indexquote['Sucucode']=='000001']
-#    sheetname = 'LC_QCashFlowStatementNew'
-#    indexquote3 = pd.read_hdf("c:/py_data/datacenter/finance.h5",sheetname,
-#                               where="AccountingStandards=1 and Mark in (1,2)")
-#    indexquote3.to_hdf(datapath2,key='%s'%sheetname,format='table',mode='a',data_columns=indexquote3.columns)
 
      
     
-#     get.get_bonus()
-#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+     get.get_bonus()
+     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+     get.产业资本增减持() #产业资本增减持数据
      
      #------更新财务、股本数据-----------------------------------------------------------------
     
@@ -336,8 +403,14 @@ if __name__ == '__main__':
 #     get.update_财务股本表('LC_CashFlowStatementAll')
 #     get.update_财务股本表('LC_QIncomeStatementNew')
 #     get.update_财务股本表('LC_QCashFlowStatementNew')
-
-     
+#
+#    indexquote2 = indexquote[indexquote['Sucucode']=='000001']
+#    sheetname = 'LC_QCashFlowStatementNew'
+#    indexquote3 = pd.read_hdf("c:/py_data/datacenter/finance.h5",sheetname,
+#                               where="AccountingStandards=1 and Mark in (1,2)")
+#    indexquote3.to_hdf(datapath2,key='%s'%sheetname,format='table',mode='a',data_columns=indexquote3.columns)
+#
+#     
      
      
      
