@@ -453,7 +453,8 @@ class trade:
                                      where='TradingDay>%s & TradingDay<=%s'%(nowtime,nexttime))  
             buy_quote = session_quote[session_quote['SecuCode'].isin(buystock)]
             
-            buy_quote = pd.merge(buy_quote,day_buy[['SecuCode','signal_rank']],on=['SecuCode'],how='left')
+           
+            buy_quote = pd.merge(buy_quote,day_buy.drop(['TradingDay','SecuAbbr'],axis=1),on=['SecuCode'],how='left')
             buy_quote['signal_rank'] = buy_quote['signal_rank'].fillna(0)
             buy_quote.index  =buy_quote['TradingDay']
             
@@ -615,7 +616,7 @@ class trade:
         holdvol0['date']  =  np.array(buytime[0])
        
          #插入代码和简称
-        name_info = buylist[['SecuCode','SecuAbbr']].drop_duplicates()
+        name_info = buylist.drop_duplicates(subset=['SecuCode'])[['SecuCode','SecuAbbr']]
         name_info.index = range(len(name_info))
         name_info = name_info.drop_duplicates()
 
@@ -660,7 +661,7 @@ class trade:
         info_ratio = alpha_sy / alpha_std
         alpha_m_rtn = np.exp(alpha.resample('m').sum())-1
         alpha_m_ratio =  100 *alpha_m_rtn[alpha_m_rtn>0].count()/alpha_m_rtn.count()
-        alpha_win_vs_loss = 100 * (-1*alpha_m_rtn[alpha_m_rtn>0].sum() / alpha_m_rtn[alpha_m_rtn<0].sum())
+        alpha_win_vs_loss = 100 * (-1*alpha_m_rtn[alpha_m_rtn>0].mean() / alpha_m_rtn[alpha_m_rtn<0].mean())
         
         alpha_performance = pd.DataFrame(np.array([benchmark_sy,alpha_sum_sy,alpha_sy,alpha_std,alpha_maxdrawdown,info_ratio,alpha_m_ratio,alpha_win_vs_loss]),
                                index=['总收益/基准累计收益','总收益/超额','年化收益率/超额','年化波动率/超额','最大回撤/超额','夏普/信息比率','月度胜利率/超额','月度平均盈亏比/超额'])
@@ -700,7 +701,7 @@ class trade:
         sharpratio = (sy - 3) / std
         m_rtn = np.exp(rtn.resample('m').sum()) - 1
         m_ratio = 100 *m_rtn[m_rtn>0].count()/m_rtn.count()
-        win_vs_loss = 100 * (-1*m_rtn[m_rtn>0].sum() / m_rtn[m_rtn<0].sum())
+        win_vs_loss = 100 * (-1*m_rtn[m_rtn>0].mean() / m_rtn[m_rtn<0].mean())
         turnover = 100 * (data['手续费']/self.feeratio/data['净值']).sum()*250/rtn.count() / 2
         
         performance = pd.DataFrame(np.array([sum_sy,sum_sy,sy,std,maxdrawdown,sharpratio,turnover,m_ratio,win_vs_loss]),
@@ -787,9 +788,9 @@ if __name__ == "__main__":
                 min_wait_buycash = 10000,
                 buynumber = 10,
                 min_holddays = 1,
-                stop_type = 'relative',
+                stop_type = None,
                 weight_type =  None,
-                loss_rtn = -0.05,
+                loss_rtn = None,
                 gain_rtn=None)
 
     #net,holdvol,sell_holdvol,tradedetail0,sell_holddays0 = trade_func.settle(buylist2,"399905",'20171030')
