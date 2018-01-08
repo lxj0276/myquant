@@ -53,7 +53,7 @@ class get_quote:
         sql = "select B.SecuCode,(select SecurityAbbr from  LC_SecuChange as o2 where o2.InfoPublDate<=A.TradingDay \
                 and o2.InnerCode=A.innercode ORDER BY o2.InfoPublDate desc limit 1) as SecuAbbr ,B.InnerCode,B.CompanyCode,\
                 A.TradingDay,A.OpenPrice as op,A.ClosePrice as cp,A.HighPrice as hp,A.LowPrice as lp,\
-                A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select AdjustingFactor from QT_AdjustingFactor as O1 where  \
+                A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select RatioAdjustingFactor from QT_AdjustingFactor as O1 where  \
                 O1.ExDiviDate <= A.TradingDay and O1.InnerCode = A.InnerCode order by O1.ExDiviDate desc limit 1),1))  as fq_cp,\
                 A.TurnoverVolume as vol,A.TurnoverValue,A.TurnoverDeals from QT_DailyQuote  A \
                 inner join SecuMain B   on A.InnerCode = B.InnerCode   and  B.SecuCategory=1 and\
@@ -62,7 +62,7 @@ class get_quote:
 #        sql = "select B.SecuCode,(select SecurityAbbr from  LC_SecuChange as o2 where o2.InfoPublDate<=A.TradingDay \
 #                and o2.InnerCode=A.innercode ORDER BY o2.InfoPublDate desc limit 1) as SecuAbbr ,B.InnerCode,B.CompanyCode,\
 #                A.TradingDay,A.OpenPrice as op,A.ClosePrice as cp,A.HighPrice as hp,A.LowPrice as lp,\
-#                A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select AdjustingFactor from QT_AdjustingFactor as O1 where  \
+#                A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select RatioAdjustingFactor from QT_AdjustingFactor as O1 where  \
 #                O1.ExDiviDate <= A.TradingDay and O1.InnerCode = A.InnerCode order by O1.ExDiviDate desc limit 1),1))  as fq_cp,\
 #                A.TurnoverVolume as vol,A.TurnoverValue,A.TurnoverDeals,(select Ashares from lc_sharestru as o3 where \
 #                o3.InfoPublDate<=A.TradingDay and o3.EndDate<=A.TradingDay and o3.CompanyCode=B.CompanyCode order by enddate \
