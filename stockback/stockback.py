@@ -245,10 +245,15 @@ class trade:
         if  new_goal_buycash.max() >= self.min_wait_buycash:             
             #涨停股票权重设为0，即不买入
             buylist['weight'] =  np.where(buylist['cp']>=(1+self.daily_limit)*buylist['precp']-0.01,0,buylist['weight'])
-            weight = new_goal_buycash  /   new_goal_buycash.sum()
-            day_weight = pd.merge(pd.DataFrame(weight),buylist[['weight','SecuCode']],left_index=True,right_index=True,how='left')#涨停不买入
-            day_weight[day_weight['weight']==0] = 0 #涨停的金额买入金额为0
-            real_goal_buycash = surplus_cash * day_weight['diff_cash']
+            if self.weight_type ==None:
+                weight = new_goal_buycash  /   new_goal_buycash.sum()
+                day_weight = pd.merge(pd.DataFrame(weight),buylist[['weight','SecuCode']],left_index=True,right_index=True,how='left')#涨停不买入
+                day_weight[day_weight['weight']==0] = 0 #涨停的金额买入金额为0
+                real_goal_buycash = surplus_cash * day_weight['diff_cash']
+            else:
+                day_weight = pd.merge(pd.DataFrame(new_goal_buycash),buylist[['weight','SecuCode']],left_index=True,right_index=True,how='left')#涨停不买入
+                day_weight[day_weight['weight']==0] = 0 #涨停的金额买入金额为0
+                real_goal_buycash  = day_weight['diff_cash']
             add_holdvol =  pd.concat([np.floor(real_goal_buycash / buylist[self.tradeprice] / (1+self.feeratio) / self.unit),
                                          buylist['vol'] * self.volratio],axis=1)
             add_holdvol = add_holdvol.min(axis=1)
@@ -635,12 +640,12 @@ class trade:
         tradedetail0 = pd.merge(name_info,tradedetail0,right_index=True,left_on='SecuCode',how='right')      
         
         #保存成交明细到excel
-#        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
-#            asset.to_excel(writer,u'asset')           
-#            sell_holdvol.to_excel(writer,'待卖出股票情况')           
-#            sell_holddays0.to_excel(writer,'股票持仓天数统计')
-#            tradedetail0.to_excel(writer,"每日成交明细")
-#            holdvol.to_excel(writer,"每日持仓明细")
+        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
+            asset.to_excel(writer,u'asset')           
+            sell_holdvol.to_excel(writer,'待卖出股票情况')           
+            sell_holddays0.to_excel(writer,'股票持仓天数统计')
+            tradedetail0.to_excel(writer,"每日成交明细")
+            holdvol.to_excel(writer,"每日持仓明细")
         
         return asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 
     
@@ -767,11 +772,11 @@ class trade:
             performance.columns = ['策略','超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]
             m_nav.columns = ['策略收益','%s收益'%benchmakr_name,'超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]    
         #保存到excel
-        with pd.ExcelWriter("C:\\py_data\\textdata\\performance.xlsx") as writer:            
-            performance.to_excel(writer,"策略表现")
-            m_nav.to_excel(writer,"收益率曲线")
-            month_sy.to_excel(writer,"每月收益")     
-            year_turnover.to_excel(writer,"换手率情况")
+#        with pd.ExcelWriter("C:\\py_data\\textdata\\performance.xlsx") as writer:            
+#            performance.to_excel(writer,"策略表现")
+#            m_nav.to_excel(writer,"收益率曲线")
+#            month_sy.to_excel(writer,"每月收益")     
+#            year_turnover.to_excel(writer,"换手率情况")
             
         
         return performance,m_nav                                    
