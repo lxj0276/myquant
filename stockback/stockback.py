@@ -640,12 +640,12 @@ class trade:
         tradedetail0 = pd.merge(name_info,tradedetail0,right_index=True,left_on='SecuCode',how='right')      
         
         #保存成交明细到excel
-        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
-            asset.to_excel(writer,u'asset')           
-            sell_holdvol.to_excel(writer,'待卖出股票情况')           
-            sell_holddays0.to_excel(writer,'股票持仓天数统计')
-            tradedetail0.to_excel(writer,"每日成交明细")
-            holdvol.to_excel(writer,"每日持仓明细")
+#        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
+#            asset.to_excel(writer,u'asset')           
+#            sell_holdvol.to_excel(writer,'待卖出股票情况')           
+#            sell_holddays0.to_excel(writer,'股票持仓天数统计')
+#            tradedetail0.to_excel(writer,"每日成交明细")
+#            holdvol.to_excel(writer,"每日持仓明细")
         
         return asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 
     
@@ -772,11 +772,11 @@ class trade:
             performance.columns = ['策略','超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]
             m_nav.columns = ['策略收益','%s收益'%benchmakr_name,'超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]    
         #保存到excel
-#        with pd.ExcelWriter("C:\\py_data\\textdata\\performance.xlsx") as writer:            
-#            performance.to_excel(writer,"策略表现")
-#            m_nav.to_excel(writer,"收益率曲线")
-#            month_sy.to_excel(writer,"每月收益")     
-#            year_turnover.to_excel(writer,"换手率情况")
+        with pd.ExcelWriter("C:\\py_data\\textdata\\performance.xlsx") as writer:            
+            performance.to_excel(writer,"策略表现")
+            m_nav.to_excel(writer,"收益率曲线")
+            month_sy.to_excel(writer,"每月收益")     
+            year_turnover.to_excel(writer,"换手率情况")
             
         
         return performance,m_nav                                    
