@@ -44,7 +44,8 @@ class factor_evaluate():
         sheetname = 'pb'
         startdate = '20110101'
         enddate = '20110301'
-        indicators = ['归母净利润同比','归母净利润同比的环比']
+        indicators = ['A股流通市值','归母净利润同比的环比']
+        indicators = ['A股流通市值','归母净利润同比的环比']
         '''
         #factors = ['secucode','secuabbr']
         indicators = str(indicators).replace("[","")
@@ -61,6 +62,7 @@ class factor_evaluate():
         #获取行情数据,获取至最新行情
         #enddate2 = pd.to_datetime(self.enddate)+datetime.timedelta(32)
         #enddate2 =  datetime.datetime.strftime(enddate2,"%Y%m%d")
+        enddate = str(int(self.enddate)+10000)
         sql = "select B.SecuCode,B.InnerCode,B.CompanyCode\
                 ,A.TradingDay,A.OpenPrice as op,A.ClosePrice as cp,A.HighPrice as hp,A.LowPrice as lp,\
                 A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select RatioAdjustingFactor from QT_AdjustingFactor as O1 where  \
@@ -70,7 +72,7 @@ class factor_evaluate():
                 desc limit 1) as AFloats from QT_DailyQuote  A \
                 inner join  (select * from SecuMain where SecuCategory=1 and SecuMarket in (83,90)) as B on\
                 A.InnerCode = B.InnerCode where TradingDay >=STR_TO_DATE("+self.startdate+",'%Y%m%d')\
-                order by SecuCode,TradingDay" 
+               and TradingDay <=STR_TO_DATE("+enddate+",'%Y%m%d') order by SecuCode,TradingDay" 
         quote = pd.read_sql(sql,con=self._dbengine)  
         print("行情数据获取完毕...")
         return quote
@@ -80,12 +82,13 @@ class factor_evaluate():
         获取指数行情
         benchmark_code:='399317',国证A股
         '''
+        enddate = str(int(self.enddate)+10000)
         sql = "select d.SecuCode,d.SecuAbbr,c.TradingDay,c.ClosePrice as cp,c.PrevClosePrice as precp,\
                 c.ChangePCT as rtn from QT_IndexQuote c\
                 inner join (select * from secumain where SecuCode="+benchmark_code+"  and secucategory\
                  in (4) and secumarket in (83,90) and listedstate=1) as d\
                 on c.innercode=d.innercode where TradingDay >STR_TO_DATE("+self.startdate+",'%Y%m%d') \
-                 order by TradingDay  "
+                and TradingDay <=STR_TO_DATE("+enddate+",'%Y%m%d') order by TradingDay  "
         indexquote = pd.read_sql(sql,con=self._dbengine)
         print('基准行情获取完毕...')
         return indexquote
@@ -114,7 +117,7 @@ class factor_evaluate():
            '''
              #转为月度数据
         time = quote[['TradingDay']].drop_duplicates()
-        time = time.resample(gp.cycle,on='TradingDay').last()
+        time = time.resample(self.cycle,on='TradingDay').last()
         quote2 = quote[quote['TradingDay'].isin(time['TradingDay'])]
         #quote2['next_rtn'] = np.where(quote2['SecuCode']==quote2['SecuCode'].shift(-1),quote2['fq_cp'].shift(-1)/quote2['fq_cp']-1,np.nan)
         for i in range(1,7):
@@ -202,9 +205,11 @@ class factor_evaluate():
         '''
         
         #quote3 = quote[['SecuCode','TradingDay','next1',indicator]]
+        columns_names = ['ICRank']
         quote3 =  quote[['SecuCode','TradingDay','next1','next2','next3','next4','next5','next6',indicator]]
         if ifnuetral==True:
-           quote3 =  quote[['SecuCode','TradingDay','next1','next2','next3','next4','next5','next6',indicator,'%s_nt'%indicator]]
+            quote3 =  quote[['SecuCode','TradingDay','next1','next2','next3','next4','next5','next6',indicator,'%s_nt'%indicator]]
+            columns_names = ['ICRank','ICRank_netural']
         #获取IC、ir标准差等值
         group = quote3.drop(['next2','next3','next4','next5','next6'],axis=1).groupby(['TradingDay'])
         corr = group.corr(method='spearman')#秩相关系数
@@ -227,6 +232,12 @@ class factor_evaluate():
         corr2 =  corr2[corr2['decay'].isin(['next1','next2','next3','next4','next5','next6'])]
         corr2 =  corr2.drop(['next1','next2','next3','next4','next5','next6'],axis=1) 
         decay = corr2.groupby(['decay']).mean().T
+        corr.columns = columns_names
+        corr['指标'] = indicator
+        corr['TradingDay'] = np.array(pd.DataFrame(corr.index)[0].apply(lambda x:x[0]))
+        corr['TradingDay'] = corr['TradingDay'].apply(lambda x:datetime.datetime.strftime(x,"%Y%m%d"))
+        result['指标'] = result.index
+        decay['指标'] = decay.index
         return corr,result,decay
     
     def get_分组行情清洗(self,quote):
@@ -255,25 +266,25 @@ class factor_evaluate():
         rtn = sy4
         hsl = hsl2
         '''
-       
+        unit = 1
         m_nav = np.exp(rtn.cumsum()) 
-        lastnet = 100 * (np.exp(rtn.sum()) - 1)
+        lastnet = unit * (np.exp(rtn.sum()) - 1)
         #m_nav.plot(figsize=(30,10))  
         m_nav_max = m_nav.cummax()
         m_nav_min= (m_nav /  m_nav_max - 1)  
-        std = 100 * (np.exp(rtn)-1).std() * np.sqrt(freq)
-        sy = 100 * (pow(np.exp(rtn.sum()),freq/rtn.count()) - 1 )
+        std = unit * (np.exp(rtn)-1).std() * np.sqrt(freq)
+        sy = unit * (pow(np.exp(rtn.sum()),freq/rtn.count()) - 1 )
         sharpratio = (sy - 3) / std
         sharpratio.iloc[len(sharpratio)-1] = sy[-1]/std[-1] #多空组计算信息比率
-        maxdrawdown = 100 * m_nav_min.min()
+        maxdrawdown = 1 * m_nav_min.min()
         calmar = sy / abs(maxdrawdown)
-        turnover = 100*12*hsl.sum()/len(hsl) #年化换手率
-        m_rtn = 100 *(np.exp(rtn.resample('m').sum()) - 1)
-        m_ratio =  100 *m_rtn[m_rtn>0].count()/m_rtn.count()#月度胜利率
+        turnover = unit*12*hsl.sum()/len(hsl) #年化换手率
+        m_rtn = unit *(np.exp(rtn.resample('m').sum()) - 1)
+        m_ratio =  unit *m_rtn[m_rtn>0].count()/m_rtn.count()#月度胜利率
         m_winloss = (-1*m_rtn[m_rtn>0].mean() / m_rtn[m_rtn<0].mean())#月度盈亏比
         performance = pd.DataFrame(np.array([lastnet,sy,std,turnover,sharpratio,calmar,maxdrawdown,m_ratio,m_winloss]).T,index = sy.index,
-                         columns=['累计收益%','年化收益率%','年化波动率%','年化换手率%','夏普比率','calmar比率','最大回撤%','月度胜利率','月度盈亏比'])
-        year_sy = 100 * (np.exp(rtn.resample('a',how='sum')) - 1)
+                         columns=['累计收益','年化收益率','年化波动率','年化换手率','夏普比率','calmar比率','最大回撤','月度胜利率','月度盈亏比'])
+        year_sy = unit * (np.exp(rtn.resample('a',how='sum')) - 1)
         by_year = rtn.groupby(lambda x:x.year)
         group_rtn = np.exp(by_year.cumsum())
         group_rtn = group_rtn / group_rtn.groupby(lambda x:x.year).cummax() - 1           
@@ -284,22 +295,22 @@ class factor_evaluate():
             benchmark_quote = benchmark_quote[benchmark_quote['TradingDay'].isin(rtn.index)]
             benchmark_quote.index = benchmark_quote['TradingDay']
             alpha = np.log(1+benchmark_quote['rtn']/100)
-            alpha_sy = 100*(pow(np.exp(rtn.sum()-alpha.sum()),freq/rtn.count()) - 1 ) #超额年化收益
+            alpha_sy = unit*(pow(np.exp(rtn.sum()-alpha.sum()),freq/rtn.count()) - 1 ) #超额年化收益
             alpha_sy.iloc[len(alpha_sy)-1] =np.nan #多空组设定为空
             alpha_rtn = np.log(1+(1 + m_nav.sub(np.exp(alpha.cumsum()),axis=0)).pct_change(periods=1))
             alpha_rtn['多空组'] = np.nan
             alpha2 = 1 + m_nav.sub(np.exp(alpha.cumsum()),axis=0)
             alpha2['多空组'] = np.nan #多空组设定为空
-            alpha_sharpratio = alpha_sy / (100*(np.exp(alpha_rtn)-1).std()*np.sqrt(freq)) #信息比率
-            alpha_maxdarwdown = 100*(alpha2/alpha2.cummax() - 1).min() #超额最大回撤
-            alpha_year_sy = 100 * (np.exp(alpha_rtn.resample('a').sum()) - 1)
-            alpha_m_rtn =  100 *(np.exp(alpha_rtn.resample('m').sum()) - 1)
-            alpha_m_ratio =  100 *alpha_m_rtn[alpha_m_rtn>0].count()/alpha_m_rtn.count()#月度胜利率
+            alpha_sharpratio = alpha_sy / (unit*(np.exp(alpha_rtn)-1).std()*np.sqrt(freq)) #信息比率
+            alpha_maxdarwdown = unit*(alpha2/alpha2.cummax() - 1).min() #超额最大回撤
+            alpha_year_sy = unit * (np.exp(alpha_rtn.resample('a').sum()) - 1)
+            alpha_m_rtn =  unit *(np.exp(alpha_rtn.resample('m').sum()) - 1)
+            alpha_m_ratio =  unit *alpha_m_rtn[alpha_m_rtn>0].count()/alpha_m_rtn.count()#月度胜利率
             alpha_m_winloss =-1*alpha_m_rtn[alpha_m_rtn>0].mean() / alpha_m_rtn[alpha_m_rtn<0].mean()#月度盈亏比
             performance = pd.DataFrame(np.array([lastnet,sy,alpha_sy,std,turnover,sharpratio,alpha_sharpratio,calmar,maxdrawdown,
                                                  alpha_maxdarwdown,m_ratio,alpha_m_ratio,m_winloss,alpha_m_winloss]).T,index = sy.index,
-                         columns=['累计收益%','年化收益率%','年化超额收益%','年化波动率%','年化换手率%','夏普比率','信息比率','calmar比率','最大回撤%',
-                                    '超额最大回撤%','月度胜利率%','超额月度胜利率%,','月度盈亏比','超额月度盈亏比'])
+                         columns=['累计收益','年化收益率','年化超额收益','年化波动率','年化换手率','夏普比率','信息比率','calmar比率','最大回撤',
+                                    '超额最大回撤','月度胜利率','超额月度胜利率','月度盈亏比','超额月度盈亏比'])
             m_nav['index'] =   np.exp(alpha.cumsum()) 
             year_sy = pd.merge(year_sy,alpha_year_sy,left_index=True,right_index=True)
             year_sy.columns = ['第1组','第2组','第3组','第4组','第5组','多空组','超额-第1组','超额-第2组','超额-第3组','超额-第4组','超额-第5组','超额-多空组']
@@ -307,9 +318,9 @@ class factor_evaluate():
             m_rtn= pd.merge(m_rtn,alpha_m_rtn,left_index=True,right_index=True)
             m_rtn.columns = ['第1组','第2组','第3组','第4组','第5组','多空组','超额-第1组','超额-第2组','超额-第3组','超额-第4组','超额-第5组','超额-多空组']
             m_rtn = m_rtn.drop(['超额-多空组'],axis=1)
-        return m_nav,performance.T,year_sy.T,m_rtn.T
+        return m_nav,performance,year_sy,m_rtn
     
-    def get_分组收益(self,quote_group,quote_factor,benchamrk_quote,indicator,ifnuetral=False):
+    def get_分组收益(self,quote_group,quote_factor,benchmark_quote,indicator,ifnuetral=False):
         '''
         分组收益，多空收益计算程序
          1. 控制涨停、停牌不买入;
@@ -317,7 +328,7 @@ class factor_evaluate():
          3.考虑每次换仓千分之1.5的手续费
 
         quote_group:日行情，包括后1个月的行情列数据；
-        quote_factor=quote_factor2：月度数据，包括因子值数据
+        quote_factor=quote_factor2.loc[:,:]：月度数据，包括因子值数据
         indicator:因子如'pb'\'pettm'
         indicator='pb'
         industry_name='行业一级'
@@ -382,7 +393,7 @@ class factor_evaluate():
 
         #获取日期数据
         date = quote_group[['TradingDay']].drop_duplicates()
-        date2 = date.resample(gp.cycle,on='TradingDay').last()
+        date2 = date.resample(self.cycle,on='TradingDay').last()
         date2['日期'] = date2['TradingDay']
         date3 = pd.merge(date,date2,on=['TradingDay'],how='left')
         date3['日期'] = date3['日期'].shift(1).fillna(method='ffill')
@@ -392,12 +403,16 @@ class factor_evaluate():
         sy3.index = sy3['TradingDay']
         sy4 = np.log(sy3[['第1组','第2组','第3组','第4组','第5组','多空组']]) #获得最终logrtn数组
         sy4 = sy4[sy4.index<=self.enddate]
-        net,performance,year_sy,month_sy = self.performance_func(sy4,250,hsl2,benchamrk_quote)
-        month_sy.columns = [str(x.year)+str(x.month) if x.month>=10 else str(x.year)+str(0)+str(x.month) for x in  list(month_sy.columns) ]
-        net['指标'] = indicator
-        performance['指标'] = indicator
-        year_sy.columns = [indicator]
-        month_sy['指标'] = indicator
+        net,performance,year_sy,month_sy = self.performance_func(sy4,250,hsl2,benchmark_quote)
+        #month_sy.columns = [str(x.year)+str(x.month) if x.month>=10 else str(x.year)+str(0)+str(x.month) for x in  list(month_sy.columns) ]
+        net['indicator'] = indicator
+        net['TradingDay'] = net.index
+        net['TradingDay'] = net['TradingDay'].apply(lambda x:datetime.datetime.strftime(x,"%Y%m%d"))
+        performance['indicator'] = indicator
+        performance['指标'] = performance.index
+        year_sy['indicator'] = indicator
+        month_sy['indicator'] = indicator
+        month_sy['TradingDay'] = pd.DataFrame(month_sy.index)['TradingDay'].apply(lambda x:datetime.datetime.strftime(x,"%Y%m%d")).values 
         return net,performance,year_sy,month_sy
     
     #----以下是第二层封装---------------------------------------------------------------------------------
@@ -425,25 +440,39 @@ class factor_evaluate():
         ic_corr,ic,ic_decay = self.get_rankic(quote_factor2,indicator,True)
         #获得分组\多空收益数据
         net,performance,year_sy,month_sy = self.get_分组收益(quote_group,quote_factor2,benchmark_quote,indicator,ifnuetral)
-        
         return ic_corr,ic,ic_decay,net,performance,year_sy,month_sy
+    
+    
+    def get_指定因子绩效(self,tablename,sheetname,indicator,industry_name,benchmark_quote,quote_ic,quote_group,ifnuetral=False,ifmktcap=True):
+        '''
+        从无到有，指定某个数据库，某个数据库中的某个字段的因子评价绩效
+        talbename：数据库
+        sheetname:数据表
+        indicator:具体的因子，如'pb'
+        industry_name:行业，如'行业一级'，行业中性用
+        benchmark_quote:基准行情，计算超额收益等绩效指标
+        quote_ic：计算因子ICrank绩效
+        quote_group：计算因子分组收益绩效
+        ifnuetral: True or False，是否是行业中性指标，默认是False,True:获取该因子行业中性后的绩效
+        ifmktcap：该因子是否市值风格中性，默认True,如果因子是‘流通市值’则可以选择False
+        '''
         
+        #参数设置，提取因子数据
+         
+        factor = self.get_因子数据(tablename,sheetname,[indicator]) #获取因子原始数据
+        #转为设定频度数据，如月度数据
+        quote_factor = self.get_数据合并(quote_ic,factor)
+        #计算因子评价体系
+        ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
+             self.get_因子评价绩效(indicator,industry_name,quote_factor,quote_group,benchmark_quote,ifnuetral)
+        return ic_corr,ic,ic_decay,net,performance,year_sy,month_sy
+         
         
     
-if __name__ == "__main__":
-    gp = factor_evaluate('m','20161231','20171231') 
-    #提取行情、行业数据，并清洗合并,得到计算IC、分组收益、基准基础数据   
-    benchmark_quote,quote_ic,quote_group = gp.get_基础数据('399317')
-    #参数设置，提取因子数据
-    tablename = 'test'
-    sheetname = 'pb'
-    indicator = ['pb','A股流通市值']
-    factor = gp.get_因子数据(tablename,sheetname,indicator) #获取因子原始数据
-    #转为设定频度数据，如月度数据
-    quote_factor = gp.get_数据合并(quote_ic,factor)
-    #计算因子评价体系
-    ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
-        gp.get_因子评价绩效(indicator[0],'行业一级',quote_factor,quote_group,benchmark_quote,ifnuetral=False)
-    
-    
-   
+#if __name__ == "__main__":
+#    gp = factor_evaluate('m','20161231','20171231') 
+    #获取基准用数据
+#    benchmark_quote,quote_ic,quote_group = gp.get_基础数据(benchmark_code)
+#    #获取单个因子绩效 
+#    ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
+#        gp.get_指定因子绩效('test','pb','A股流通市值','行业一级',benchmark_quote,quote_ic,quote_group,ifnuetral=True,ifmktcap=True)
