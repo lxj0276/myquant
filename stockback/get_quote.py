@@ -45,6 +45,17 @@ class get_quote:
                            charset='gbk')
         self.datapath = "C:\\py_data\\datacenter\\quote.h5"
         self.datapath2 = "C:\\py_data\\datacenter"
+    
+    def transto_None(self,data):
+        '''
+        处理data数据中包含nan、inf数据，转为None,以便mysql数据库能够认识
+        '''
+        columns = list(data.columns)
+        for i in range(len(columns)):
+            names = columns[i]
+            data[names] = np.where(pd.isnull(data[names])!=True, data[names], None)
+            data[names] = np.where(data[names]==np.inf, None,data[names])
+        return data
 
     #-------------------------------获取聚源数据---------------------------------------------     
     def get_equityquote(self,startdate,enddate):
@@ -227,23 +238,41 @@ class get_quote:
         print("%s提取完毕"%sheetname)
 #        data.to_hdf("C:\\py_data\\datacenter\\test.h5",key='test',format='table',mode='a',data_columns=data.columns)
 #        aa  = pd.read_hdf("C:\\py_data\\datacenter\\test.h5",'test',columns=['AccountingStandards'])
+    
+    def astype(self,data,bench_data):
+        '''
+        把data中的列数据格式转换成bench_data中的列数据格式
+        '''
+        for i in data.columns:
+            data[i] = data[i].astype(bench_data[i].dtype)
+        return data
+     
         
+    
     def update_财务股本表(self,sheetname):
         '''
         更新财务数据,不包括股本表
-        sheetname='LC_IncomeStatementAll'
+        sheetname='LC_FSDerivedData'
         '''
-        startdate = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',where="InfoPublDate>='20171030'",columns=['InfoPublDate'])
-        startdate = datetime.datetime.strftime(startdate['InfoPublDate'].max() ,"%Y%m%d")
+        olddata = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',where='InfoPublDate>="20180201"')
+        #startdate = datetime.datetime.strftime(olddata['InfoPublDate'].max() ,"%Y%m%d")
+        id2  = str(olddata['ID'].max())
         
         if sheetname=='LC_QIncomeStatementNew' or  sheetname=='LC_QCashFlowStatementNew':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and Mark in (1,2) \
-                    and InfoPublDate>"+startdate+""
-       
+                    and ID>"+id2+""
+        elif sheetname=='LC_FSDerivedData':
+            sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfAdjusted in (1,2)\
+                    and  ID>"+id2+""
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1\
-                    and IfAdjusted in (1,2) and InfoPublDate>"+startdate+""            
-        data.to_hdf(datapath2+'\\%s.h5',key='data',format='table',mode='r+',data_columns=olddata.columns)
+                    and IfAdjusted in (1,2) and ID>"+id2+""
+        newdata = pd.read_sql(sql,con=self._dbengine1)
+        if len(newdata) > 0:
+            newdata =  self.astype(newdata,olddata)
+            newdata.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='r+',data_columns=newdata.columns,append=True)         
+            #data = olddata.append(newdata)
+            #data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=data.columns)         
         print("%s更新完毕"%sheetname)
         
     def get_industry(self):
@@ -272,15 +301,17 @@ class get_quote:
         print("指数成分股提取完毕....")
     
     def update_指数成分股(self):
-        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where="EndDate>'20171030'",columns=['IndexCode','EndDate','Index_SecuCode'])
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180101"')
         startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
         indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
         sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
                 EndDate>"+startdate+" and IndexCode in "+indexcode+""
         newdata = pd.read_sql(sql,con=self._dbengine1)
-        
-        newdata = pd.merge(newdata,data[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
-        newdata.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='r+',data_columns=newdata.columns)
+        if len(newdata) >0:
+            newdata = pd.merge(newdata,data[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
+            newdata = self.astype(newdata,data)
+            #newdata = data.append(newdata)
+            newdata.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='r+',data_columns=newdata.columns,append=True)
         print("指数成分股更新完毕....") 
     
     def 产业资本增减持(self):
@@ -370,48 +401,31 @@ if __name__ == '__main__':
      get =  get_quote()
     
 
-
     
     #当且仅当从头开始提取数据时运行，否则不运行,更新行情、指数及财务报表数据—------------------------
 #     get.new_data('equity_quote',get.get_equityquote) #提取股票行情
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
-     get.get_指数成分股()
-     
-     #get.update_指数成分股()   
+#     get.get_指数成分股()
+#     get.get_财务表('LC_BalanceSheetAll')
+#     get.get_财务表('LC_IncomeStatementAll')
+#     get.get_财务表('LC_CashFlowStatementAll')
+#     get.get_财务表('LC_QIncomeStatementNew')
+#     get.get_财务表('LC_QCashFlowStatementNew')
+#     get.get_财务表('LC_FSDerivedData')
+
+     #---数据更新-------------------------------------------------------------------------------    
+     get.update_指数成分股()   
      get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
      get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
-     get.get_财务表('LC_BalanceSheetAll')
-     get.get_财务表('LC_IncomeStatementAll')
-     get.get_财务表('LC_CashFlowStatementAll')
-     get.get_财务表('LC_QIncomeStatementNew')
-     get.get_财务表('LC_QCashFlowStatementNew')
-     get.get_财务表('LC_FSDerivedData')
-          
-
-
-     
-    
+     get.update_财务股本表('LC_BalanceSheetAll')
+     get.update_财务股本表('LC_IncomeStatementAll')
+     get.update_财务股本表('LC_CashFlowStatementAll')
+     get.update_财务股本表('LC_QIncomeStatementNew')
+     get.update_财务股本表('LC_QCashFlowStatementNew') 
+     get.update_财务股本表('LC_FSDerivedData')    
      get.get_bonus()
      get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
      get.产业资本增减持() #产业资本增减持数据
-     
-     #------更新财务、股本数据-----------------------------------------------------------------
-    
-   
-#     get.update_财务股本表('LC_BalanceSheetAll')
-#     get.update_财务股本表('LC_IncomeStatementAll')
-#     get.update_财务股本表('LC_CashFlowStatementAll')
-#     get.update_财务股本表('LC_QIncomeStatementNew')
-#     get.update_财务股本表('LC_QCashFlowStatementNew')
-#
-#    indexquote2 = indexquote[indexquote['Sucucode']=='000001']
-#    sheetname = 'LC_QCashFlowStatementNew'
-#    indexquote3 = pd.read_hdf("c:/py_data/datacenter/finance.h5",sheetname,
-#                               where="AccountingStandards=1 and Mark in (1,2)")
-#    indexquote3.to_hdf(datapath2,key='%s'%sheetname,format='table',mode='a',data_columns=indexquote3.columns)
-#
-#     
-     
      
      
      
