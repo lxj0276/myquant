@@ -9,7 +9,7 @@ from 因子评价体系 import *
 
 class factor_result_to_mysql(factor_evaluate):
     
-    def create_to_mysql(self,zero_begin=False,ifnuetral=False):
+    def create_result_sheet(self):
         '''
         zero_begin:True or False,代表是否初始化，初始化则数据清空，重新建表
         ifnuetral：入库的是否是中性化的因子的绩效
@@ -99,26 +99,33 @@ class factor_result_to_mysql(factor_evaluate):
                             indicator varchar(100),\
                             TradingDay datetime)"
         sheetnames = ['ic_corr','ic_performance','ic_decay','net','group_performance','year_sy','month_sy']
-        data = ['ic_corr','ic','ic_decay','net','performance','year_sy','month_sy']
-        if zero_begin == True:#初始化时创建数据表
+        
+        for i in range(7):
+            self.create_newtable('result',sheetnames[i],eval('data_structure%s'%i)) #创建表    
+    
+    def insert_to_result(self,ic_corr,ic_performance,ic_decay,net,group_performance,year_sy,month_sy,ifnuetral):
+        '''
+        ifnuetral:是否因子中性
+        #由于data_structure3-7需要指定是否行业中性，得到结果是原始值绩效或者行业中性后的绩效，而0-2结果本身包含了原始值和中性后绩效
+        '''
+        data = ['ic_corr','ic_performance','ic_decay','net','group_performance','year_sy','month_sy']
+        _dbengine = gp.connect_mysql('result')#连接到reslut数据库
+        if ifnuetral == False:
             for i in range(7):
-                self.create_newtable('result',sheetnames[i],eval('data_structure%s'%i)) #创建表    
-        else: #非初始化，则插入数据
-            #由于data_structure3-7需要指定是否行业中性，得到结果是原始值绩效或者行业中性后的绩效，而0-2结果本身包含了原始值和中性后绩效
-            if ifnuetral == False:
-                for i in range(7):
-                    names = str([x.split()[0] for x in eval('data_structure%s'%i).split(',')][1:])
-                    names = names.replace('[','(').replace(']',')').replace("'","")               
-                    self.transto_None(eval(data[i])) #空值处理
-                    self.insert_data('result',sheetnames[i],names,eval(data[i])) #插入数据
-                    #print('%s数据插入完毕'%sheetnames[i])        
-            elif ifnuetral == True:
-                for i in range(3,7):
-                    names = str([x.split()[0] for x in eval('data_structure%s'%i).split(',')][1:])
-                    names = names.replace('[','(').replace(']',')').replace("'","")  
-                    self.transto_None(eval(data[i])) #空值处理
-                    self.insert_data('result',sheetnames[i],names,eval(data[i])) #插入数据
-                    #print('%s数据插入完毕'%sheetnames[i])
+                sql2 = "select column_name from information_schema.COLUMNS where table_name='%s' "%data[i]
+                names = list(pd.read_sql(sql2,con=_dbengine)['column_name'])[1:]
+                names = str(names).replace('[','(').replace(']',')').replace("'","")               
+                self.transto_None(eval(data[i])) #空值处理
+                self.insert_data('result',data[i],names,eval(data[i])) #插入数据
+                #print('%s数据插入完毕'%sheetnames[i])        
+        elif ifnuetral == True:
+            for i in range(3,7):
+                sql2 = "select column_name from information_schema.COLUMNS where table_name='%s' "%data[i]
+                names = list(pd.read_sql(sql2,con=_dbengine)['column_name'])[1:]
+                names = str(names).replace('[','(').replace(']',')').replace("'","")      
+                self.transto_None(eval(data[i])) #空值处理
+                self.insert_data('result',data[i],names,eval(data[i])) #插入数据
+                #print('%s数据插入完毕'%sheetnames[i])
         
    
     def create_newtable(self,databasename,tablename,data_structure):
@@ -204,7 +211,7 @@ class factor_result_to_mysql(factor_evaluate):
                            charset='gbk')
         return dbengine
     
-    def all因子绩效入库(self,tablename,benchmark_quote,quote_ic,quote_group):
+    def all因子绩效入库(self,tablename,benchmark_quote,quote_ic,quote_group,how):
         '''
         获取某个数据库中，某个字段表的名称
         tablename = 'value' 数据库名称
@@ -212,6 +219,9 @@ class factor_result_to_mysql(factor_evaluate):
         benchmark_quote：基准行情，计算超额收益等绩效用
         quote_ic：计算IC用行情
         quote_group：计算因子分组绩效用
+        indicator = '流通市值'
+        performance_data_name:绩效结果的名称,list=['ic_corr','ic','ic_decay','net','performance','year_sy','month_sy']
+        how='inner'
         '''
         #获取数库中所以数据的表名
         _dbengine = self.connect_mysql(tablename) #连接到该数据库
@@ -221,41 +231,41 @@ class factor_result_to_mysql(factor_evaluate):
             sheetname = sheetnames.iloc[i,0]
             #获取数据库表中
             sql2 = "select column_name from information_schema.COLUMNS where table_name='%s' "%sheetname
-            indicators = list(pd.read_sql(sql2,con=_dbengine)['column_name'])[3:]
+            indicators = list(pd.read_sql(sql2,con=_dbengine).drop_duplicates()['column_name'])[3:]
             factor = self.get_因子数据(tablename,sheetname,indicators) #获取因子原始数据
             #转为设定频度数据，如月度数据
-            quote_factor = self.get_数据合并(quote_ic,factor)
+            quote_factor = self.get_数据合并(quote_ic,factor,how)
                
             for j in range(len(indicators)):
                 indicator = indicators[j]
+                print("计算的因子是：%s"%indicator)
+                ifmktcap = indicator.find("市值")<0 #带有市值的估值因子仅作行业中性化处理，不做市值中性
                 #计算因子评价体系,先计算原始因子的绩效
                 ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
-                gp.get_因子评价绩效(indicator,'行业一级',quote_factor,quote_group,benchmark_quote,ifnuetral=False)
-                #以上的结果保存至数据库
-                self.create_to_mysql(ifnuetral=False)
+                self.get_因子评价绩效(indicator,'行业一级',quote_factor,quote_group,benchmark_quote,False,ifmktcap)               
+                self.insert_to_result(ic_corr,ic,ic_decay,net,performance,year_sy,month_sy,ifnuetral=False)#结果保存至数据库
                 #后计算因子中性化后的绩效
                 ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
-                gp.get_因子评价绩效(indicator,'行业一级',quote_factor,quote_group,benchmark_quote,ifnuetral=True)
-                #以上的结果保存至数据库
-                self.create_to_mysql(ifnuetral=True)
+                self.get_因子评价绩效(indicator,'行业一级',quote_factor,quote_group,benchmark_quote,True,ifmktcap)               
+                self.insert_to_result(ic_corr,ic,ic_decay,net,performance,year_sy,month_sy,ifnuetral=True)
+
             print("%s表中的因子全部插入数据库"%sheetname)
         print("%s数据库因子绩效结果全部入库"%tablename)
         
         
     
 if __name__ == "__main__":
-    gp = factor_result_to_mysql('m','20101231','20111231') 
-      #提取行情、行业数据，并清洗合并,得到计算IC、分组收益、基准基础数据   
-#    benchmark_quote,quote_ic,quote_group = gp.get_基础数据('399317')
+    lastdate = datetime.datetime.today()
+    lastdate = datetime.datetime.strftime(lastdate,"%Y%m%d")
+    gp = factor_result_to_mysql('m','20071231',lastdate) 
+     #提取行情、行业数据，并清洗合并,得到计算IC、分组收益、基准基础数据   
+    benchmark_quote,quote_ic,quote_group = gp.get_基础数据('399317')
  
     #获取单个因子绩效 
 #    ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
 #        gp.get_指定因子绩效('test','pb','A股流通市值','行业一级',benchmark_quote,quote_ic,quote_group,ifnuetral=True,ifmktcap=True)
 
     
-    #批量获取数据库因子绩效，并插入数据库
-    gp.create_to_mysql(zero_begin=True) #初始化因子库，建表
-    gp.all因子绩效入库('value',benchmark_quote,quote_ic,quote_group)
-
-
-        
+    #获取这个因子库的绩效，并入库
+    gp.create_result_sheet() #初始化因子库，建表
+    gp.all因子绩效入库('value',benchmark_quote,quote_ic,quote_group,'inner')
