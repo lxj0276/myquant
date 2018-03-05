@@ -12,6 +12,7 @@ import pymysql
 import datetime
 import statsmodels.api as sm
 import matplotlib.pyplot  as plt
+import time
 
 class factor_evaluate():
     
@@ -58,6 +59,19 @@ class factor_evaluate():
         data = pd.read_sql(sql,con=self._dbengine1)
         return data
     
+    def get_日期表(self):
+        '''
+        获取交易日和自然日对应的日期表，自然日字段：TradingDate，交易日字段：TradingDay
+        '''
+        sql = "select * from QT_TradingDayNew where SecuMarket=83 order by TradingDate"
+        date = pd.read_sql(sql,con=self._dbengine)  
+        date_jy = date[date['IfTradingDay']==1]
+        date_jy['dt'] = date_jy['TradingDate']
+        date2 = pd.merge(date,date_jy[['TradingDate','dt']],on='TradingDate',how='left')
+        date2['dt'] = date2['dt'].fillna(method='ffill')  
+        date2 =  date2[['TradingDate','dt']]
+        return date2
+    
     def get_equityquoe(self):
         #获取行情数据,获取至最新行情
         #enddate2 = pd.to_datetime(self.enddate)+datetime.timedelta(32)
@@ -93,36 +107,62 @@ class factor_evaluate():
         print('基准行情获取完毕...')
         return indexquote
     
-    def get_数据合并(self,data1,data2):
+    def get_数据合并(self,data1,data2,how):
         '''
         两列日期对不上数据的合并程序
         取data1中小于该日期的，最新的data2中的值
-        比如data1：行情数据，有TradingDay、SecuCode、cp等数据;data2:行业数据，有行业一级等字段，该字段随TradingDay不定期改变
+        比如data1：行情数据，有TradingDay、SecuCode、cp等数据;
+        data2:行业数据，有行业一级等字段，该字段随TradingDay不定期改变,需要一张自然日和工作日对应表的处理
         目的是合并data1,data2,在data1中每一天，都能够取到data2最新行业分类
+        factor.columns[2:]
+        data1 = quote_ic.loc[:,:]
+        data2 = factor.loc[:,:]
+        how:数据合并方式，TRUE:代表用outer，针对不定期存储因子；
+        aa = data2[:100]
         '''
-        data = pd.merge(data1,data2,on=['SecuCode'],how='outer')
-        data = data[data['TradingDay_x']>=data['TradingDay_y']]
-        data = data.sort_values(['SecuCode','TradingDay_x','TradingDay_y'])
-        data = data.drop_duplicates(['SecuCode','TradingDay_x'],keep='last')
-        data['TradingDay'] =  data['TradingDay_x']
-        data = data.drop(['TradingDay_y','TradingDay_x'],axis=1)
+#        mindate = data1['TradingDay'].min()
+#        maxdate = data1['TradingDay'].max()
+#        rq2 =rq[(rq['TradingDate']>=mindate)&(rq['TradingDate']<=maxdate)]
+#        rq2 = rq2[rq2['if']]
+        
+        #使用outer，用以因子数据及DATA2数据是不定期的情况
+        if how == 'outer':
+            data = pd.merge(data1,data2,on=['SecuCode'],how='outer')
+            data = data[data['TradingDay_x']>=data['TradingDay_y']]
+            data = data.sort_values(['SecuCode','TradingDay_x','TradingDay_y'])
+            data = data.drop_duplicates(['SecuCode','TradingDay_x'],keep='last')
+            data['TradingDay'] =  data['TradingDay_x']
+            data = data.drop(['TradingDay_y','TradingDay_x'],axis=1)
+        else: #用于data2数据是定期的情况
+            time = data2[['TradingDay']].drop_duplicates() 
+            time = time.resample(self.cycle,on='TradingDay').last()
+            time['dt'] = time.index
+            data3 = data2[data2['TradingDay'].isin(time['TradingDay'])]
+            data3 = pd.merge(data3,time,on='TradingDay',how='left')
+            data3 = data3.drop(['TradingDay'],axis=1)
+            data = pd.merge(data1,data3,on=['SecuCode','dt'],how='left')        
         return data
-    
-    
-    def get_行情数据清洗(self,quote,industry):
+        
+     
+    def get_行情数据清洗(self,quote,industry,how):
         '''
         转为月度【指定频度】数据，并合并行情和行业分类数据
         1.先转为指定频度数据（月）数据，计算下一期收益率
         2.合并行业数据
+        rq:自然日和交易日对应表
+        data = quote.loc[:,:]
            '''
-             #转为月度数据
+        #转为月度数据
         time = quote[['TradingDay']].drop_duplicates()
         time = time.resample(self.cycle,on='TradingDay').last()
+        time['dt'] = time.index
+#        quote2 = quote.groupby(['SecuCode']).resample('m',on='TradingDay').last()
+#        quote2['dt'] = pd.DataFrame(quote2.index)[0].apply(lambda x:x[1]).values
         quote2 = quote[quote['TradingDay'].isin(time['TradingDay'])]
-        #quote2['next_rtn'] = np.where(quote2['SecuCode']==quote2['SecuCode'].shift(-1),quote2['fq_cp'].shift(-1)/quote2['fq_cp']-1,np.nan)
+        quote2 = pd.merge(quote2,time,on='TradingDay',how='left')
         for i in range(1,7):
-            quote2['next%s'%str(i)] = np.where(quote2['SecuCode']==quote2['SecuCode'].shift(-i),quote2['fq_cp'].shift(-i)/quote2['fq_cp']-1,np.nan)
-        data = self.get_数据合并(quote2,industry)
+            quote2['next%s'%str(i)] = np.where(quote2['SecuCode']==quote2['SecuCode'].shift(-i),quote2['fq_cp'].shift(-i)/quote2['fq_cp'].shift(-i+1)-1,np.nan)
+        data = self.get_数据合并(quote2,industry,how)
         data['mktcap'] = data['cp'] *data['AFloats']
         print("IC计算用数据清洗完毕...")
         return data   
@@ -251,7 +291,15 @@ class factor_evaluate():
         quote4['date'] =  quote4['TradingDay'].apply(lambda x:int(datetime.datetime.strftime(x,"%Y%m%d")))
         #quote4['logrtn'] = quote4['cp']/quote4['precp']
         maxdate =  20990101 
-        for i in range(1,24):#收益&日期
+        maxdays = 24 #默认月度数据，则每个月最大交易天数为23天
+        if self.cycle=='w':
+            days = 6 #每周最大天数为5天
+        elif self.cycle == 'd':
+            days = 2
+        else:
+            days=24
+                 
+        for i in range(1,days):#收益&日期
             quote4[i] = np.where(quote4['SecuCode']==quote4['SecuCode'].shift(-i),quote4['fq_cp'].shift(-i)/quote4['fq_cp'],np.nan)
             quote4['next%s'%str(i)] = np.where(quote4['SecuCode']==quote4['SecuCode'].shift(-i),quote4['date'].shift(-i),maxdate)
         print("多空收益计算用数据清洗完毕...")
@@ -274,7 +322,7 @@ class factor_evaluate():
         m_nav_min= (m_nav /  m_nav_max - 1)  
         std = unit * (np.exp(rtn)-1).std() * np.sqrt(freq)
         sy = unit * (pow(np.exp(rtn.sum()),freq/rtn.count()) - 1 )
-        sharpratio = (sy - 3) / std
+        sharpratio = (sy - 0.03) / std
         sharpratio.iloc[len(sharpratio)-1] = sy[-1]/std[-1] #多空组计算信息比率
         maxdrawdown = 1 * m_nav_min.min()
         calmar = sy / abs(maxdrawdown)
@@ -423,8 +471,14 @@ class factor_evaluate():
         quote = self.get_equityquoe()
         benchmark_quote = self.get_indexquote(benchmark_code) #获取国政A指基准
         industry = self.get_因子数据('test','sw_industry',['行业一级','行业二级'])#获取申万行业数据   
-        quote_ic = self.get_行情数据清洗(quote,industry) #行业分类数据插入到行情中,IC计算用
+#        rq = self.get_日期表()
+#        industry = pd.merge(industry,rq,left_on=['TradingDay'],right_on=['TradingDate'],how='left')
+#        industry['TradingDay'] = industry['dt']
+#        industry = industry.drop(['TradingDate','dt'],axis=1)   
+#        industry = industry.dropna(subset=['TradingDay'])
+        quote_ic = self.get_行情数据清洗(quote,industry,how='outer') #行业分类数据插入到行情中,IC计算用
         quote_group = self.get_分组行情清洗(quote) #获取分组用的收益数据，分组多空收益计算用
+        print("基础数据提取完毕")
         return benchmark_quote,quote_ic,quote_group
    
     def get_因子评价绩效(self,indicator,industry_name,quote_factor,quote_group,benchmark_quote,ifnuetral,ifmktcap=True):
@@ -443,36 +497,45 @@ class factor_evaluate():
         return ic_corr,ic,ic_decay,net,performance,year_sy,month_sy
     
     
-    def get_指定因子绩效(self,tablename,sheetname,indicator,industry_name,benchmark_quote,quote_ic,quote_group,ifnuetral=False,ifmktcap=True):
+    def get_指定因子绩效(self,tablename,sheetname,indicator,industry_name,benchmark_quote,quote_ic,quote_group,how,ifnuetral=False,ifmktcap=True):
         '''
         从无到有，指定某个数据库，某个数据库中的某个字段的因子评价绩效
-        talbename：数据库
-        sheetname:数据表
-        indicator:具体的因子，如'pb'
+        tablename='value'：数据库
+        sheetname='pb:数据表
+        indicator=['pb','A股流通市值']:具体的因子，如'pb'
+        indicator = 'pb'
         industry_name:行业，如'行业一级'，行业中性用
         benchmark_quote:基准行情，计算超额收益等绩效指标
+        rq:自然日和交易日对应的日期表
         quote_ic：计算因子ICrank绩效
         quote_group：计算因子分组收益绩效
+        how:数据合并方式 分为'outer'和'left',outer针对不定期的因子数据，如财务数据，其他对应定期因子数据，如按月或者周存储的pb因子数据
         ifnuetral: True or False，是否是行业中性指标，默认是False,True:获取该因子行业中性后的绩效
         ifmktcap：该因子是否市值风格中性，默认True,如果因子是‘流通市值’则可以选择False
         '''
         
         #参数设置，提取因子数据
-         
+        ifmktcap = indicator.find("市值")<0 # 
         factor = self.get_因子数据(tablename,sheetname,[indicator]) #获取因子原始数据
         #转为设定频度数据，如月度数据
-        quote_factor = self.get_数据合并(quote_ic,factor)
+        quote_factor = self.get_数据合并(quote_ic,factor,how)
         #计算因子评价体系
         ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
-             self.get_因子评价绩效(indicator,industry_name,quote_factor,quote_group,benchmark_quote,ifnuetral)
+             self.get_因子评价绩效(indicator,industry_name,quote_factor,quote_group,benchmark_quote,ifnuetral,ifmktcap)
         return ic_corr,ic,ic_decay,net,performance,year_sy,month_sy
          
         
     
-#if __name__ == "__main__":
-#    gp = factor_evaluate('m','20161231','20171231') 
-    #获取基准用数据
+if __name__ == "__main__":
+#    gp = factor_evaluate('m','20091231','20171231') 
+#    benchmark_code= '399317' 
+#    import time
+#    t0 = time.time()
+#    #获取基准用数据
 #    benchmark_quote,quote_ic,quote_group = gp.get_基础数据(benchmark_code)
-#    #获取单个因子绩效 
-#    ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
-#        gp.get_指定因子绩效('test','pb','A股流通市值','行业一级',benchmark_quote,quote_ic,quote_group,ifnuetral=True,ifmktcap=True)
+    #获取单个因子绩效  
+    t1 = time.time()
+    ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
+        gp.get_指定因子绩效('value','pb','pb','行业一级',benchmark_quote,quote_ic,quote_group,how='inner',ifnuetral=False,ifmktcap=True)
+    t2 = time.time()
+    #print("提取行情所用时间为%f \n 计算绩效所用时间为%f"%(t1-t0,t2-t1))
