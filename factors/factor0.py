@@ -54,14 +54,9 @@ class init_factor:
                            password='jydb',
                            charset='gbk')
         self.datapath  = "C:\\py_data\\datacenter\\quote.h5"
- 
-
-
-
-
-
- 
-
+        
+        
+        
 #    def __del__(self):
 #        self._dbengine.close()
     def to_查错(self,data,datapath):
@@ -87,31 +82,21 @@ class init_factor:
         return data
      
     
-    def get_行情(self,startdate,indicator=None,indicator1=None):
+    def get_行情(self,startdate):
         '''
-        获取聚源数据库非复权行情数据,从本地的H5中获取，最多获取三个字段，默认获取收盘数据
+        获取聚源数据库非复权行情数据,
+        包括SecuCode\InnerCode\CompanyCode\TradingDay\op\cp\lp\hp\vol\TurnoverValue\TurnoverDeals字段数据
+        startdate='20170101'
         '''
-        sql = "select B.SecuCode ,B.InnerCode,B.CompanyCode,\
-                A.TradingDay,A.ClosePrice as cp from QT_DailyQuote  A \
-                inner join SecuMain B   on A.InnerCode = B.InnerCode   and  B.SecuCategory=1 and\
-                B.SecuMarket in (83,90)  where TradingDay >=STR_TO_DATE("+startdate+",'%Y%m%d')  \
-                order by TradingDay"
-        if indicator is not None:
-            sql = "select B.SecuCode ,B.InnerCode,B.CompanyCode,\
-                A.TradingDay,A.ClosePrice as cp, "+indicator+" from QT_DailyQuote  A \
-                inner join SecuMain B   on A.InnerCode = B.InnerCode   and  B.SecuCategory=1 and\
-                B.SecuMarket in (83,90)  where TradingDay >=STR_TO_DATE("+startdate+",'%Y%m%d')  \
-                order by TradingDay"
-        if indicator1 is not None:
-            sql = "select B.SecuCode ,B.InnerCode,B.CompanyCode,\
-                A.TradingDay,A.ClosePrice as cp, "+indicator+","+indicator1+" from QT_DailyQuote  A \
-                inner join SecuMain B   on A.InnerCode = B.InnerCode   and  B.SecuCategory=1 and\
-                B.SecuMarket in (83,90)  where TradingDay >=STR_TO_DATE("+startdate+",'%Y%m%d')  \
-                order by TradingDay"
-               
+        sql = "select B.SecuCode,B.InnerCode,B.CompanyCode\
+                ,A.TradingDay,A.OpenPrice as op,A.ClosePrice as cp,A.HighPrice as hp,A.LowPrice as lp,\
+                A.PrevClosePrice as precp,(A.ClosePrice * ifnull((select RatioAdjustingFactor from QT_AdjustingFactor as O1 where  \
+                O1.ExDiviDate <= A.TradingDay and O1.InnerCode = A.InnerCode order by O1.ExDiviDate desc limit 1),1))  as fq_cp,\
+                A.TurnoverVolume as vol,A.TurnoverValue,A.TurnoverDeals from QT_DailyQuote  A \
+                inner join  (select * from SecuMain where SecuCategory=1 and SecuMarket in (83,90)) as B on\
+                A.InnerCode = B.InnerCode where TradingDay >STR_TO_DATE("+startdate+",'%Y%m%d')" 
         quote = pd.read_sql(sql,con=self._dbengine)
         return quote
-        
     
     
     def get_交易日期(self,startdate):
@@ -176,11 +161,12 @@ class init_factor:
                             values(%s,%s,%s,%s,%s)" 
         names = "(dt,SecuCode,营业收入TTM,营业收入TTM同比,营业收入TTM环比)"
         tuple(len(names.split(','))*[%s])
-        values:插入的数据，np.array格式
-        databasename = 'test'
-        tablename = 'test0'
+        values=OperatingRevenue_week[:10000]:插入的数据，np.array格式
+        databasename = 'growth'
+        tablename = 'OperatingRevenue_week'
+        
         '''
-        cursor = self._dbengine1.cursor()
+        cursor =  self._dbengine1.cursor()
         vv = str(('%s,'*len(names.split(','))))[:-1]
         try:
             insert_sql = "insert into %s.%s %s values(%s)"%(databasename,tablename,names,vv)
@@ -195,9 +181,9 @@ class init_factor:
             # 如果发生错误则回滚
             self._dbengine1.rollback()
             print(e)         
-        finally:
-            self._dbengine.close()
-            self._dbengine1.close()
+#        finally:
+#            self._dbengine.close()
+#            self._dbengine1.close()
     
     def get_最近的数据(self,databasename,tablename):
         '''
@@ -329,97 +315,71 @@ class init_factor:
         data['temp'] = data[indicator]
         data = pd.merge(data,data[['CompanyCode','EndDate','temp']],left_on=['predate','CompanyCode'],
                                 right_on = ['EndDate','CompanyCode'],how='left')
-        data['单季值'] = np.where(((data['month']==3)|(data['month']==12)),data[indicator],
-                            data[indicator]-data['temp_y'])
+        data['单季值'] = np.where(data['month']==3,data[indicator],data[indicator]-data['temp_y'])
         return data['单季值'].values
     
-    def get_财务表(self,sheetname,startdate,indicator1,indicator2=None,indicator3=None,indicator4=None,indicator5=None):
+    def get_财务表(self,sheetname,startdate,indicators):
         '''
         sheetname:
         1.利润分配表_新会计准则 LC_IncomeStatementAll,最多可以同时提取5个指标
         2. 资产负债表_新会计准则 LC_BalanceSheetAll
         3. 现金流量表_新会计准则 LC_CashFlowStatementAll
+        4. 公司衍生报表数据_新会计准则（新） LC_FSDerivedData 
+        4. 非经常性损益 LC_NonRecurringEvent 
+        indicators = ['NPParentCompanyOwners','OtherNetRevenue']
         '''
-                    
+        indicators = str(indicators).replace("[","")
+        indicators = indicators.replace("]","")
+        indicators = indicators.replace("'","")            
         sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted, EnterpriseType as CompanyType,\
-                "+indicator1+" from  "+sheetname+"    where \
-                 IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator2 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
-                    "+indicator1+" ,"+indicator2+" from  "+sheetname+"    where \
-                     IfMerged=1 and IfAdjusted in (1,2)  and InfoPublDate>="+startdate+"" 
-        if indicator3 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+" from  "+sheetname+"    where \
-                      IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator4 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+" from  "+sheetname+"   where \
-                     IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator5 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,IfAdjusted,EnterpriseType as CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+","+indicator5+" from "+sheetname+"   where \
-                     IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+""             
+                "+indicators+" from  "+sheetname+"    where \
+                 IfMerged=1 and IfAdjusted in (1,2) and InfoPublDate>="+startdate+" and\
+                 CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
+                 and SecuCategory=1 )  "       
+        if sheetname == 'LC_FSDerivedData':
+            sql = "select  InfoPublDate,CompanyCode,EndDate,IfAdjusted, "+indicators+" \
+                    from "+sheetname+"    where IfMerged=1 and IfAdjusted in (1,2) and\
+                    InfoPublDate>="+startdate+" and CompanyCode in (SELECT CompanyCode \
+                    from secumain where  SecuMarket in (83,90) and SecuCategory=1 ) "
+        if sheetname == 'LC_NonRecurringEvent':
+            sql = "select  InfoPublDate,CompanyCode,EndDate,IfAdjusted, "+indicators+" \
+                    from "+sheetname+"    where ItemCode=32767 and \
+                    InfoPublDate>="+startdate+" and CompanyCode in (SELECT CompanyCode \
+                    from secumain where  SecuMarket in (83,90) and SecuCategory=1 ) " 
         data = pd.read_sql(sql,con=self._dbengine)
         return data
     
-    def get_单季财务表(self,sheetname,startdate,indicator1,indicator2=None,indicator3=None,indicator4=None,indicator5=None):
+    
+    def get_单季财务表(self,sheetname,startdate,indicators):
         '''
         sheetname:
         1.利润分配表_新会计准则 LC_IncomeStatementAll,最多可以同时提取5个指标
         2. 资产负债表_新会计准则 LC_BalanceSheetAll
         3. 现金流量表_新会计准则 LC_CashFlowStatementAll
         '''
-                    
+        indicators = str(indicators).replace("[","")
+        indicators = indicators.replace("]","")
+        indicators = indicators.replace("'","")             
         sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType,\
-                "+indicator1+" from  "+sheetname+"    where \
-                 Mark in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator2 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
-                    "+indicator1+" ,"+indicator2+" from  "+sheetname+"    where \
-                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator3 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+" from  "+sheetname+"    where \
-                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator4 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+" from  "+sheetname+"   where \
-                     Mark in (1,2) and InfoPublDate>="+startdate+"" 
-        if indicator5 is not None:
-            sql = "select InfoPublDate,CompanyCode,EndDate,Mark, CompanyType, \
-                    "+indicator1+" ,"+indicator2+","+indicator3+","+indicator4+","+indicator5+" from "+sheetname+"   where \
-                     Mark in (1,2) and InfoPublDate>="+startdate+""             
-        data = pd.read_sql(sql,con=self._dbengine)
+                "+indicators+" from  "+sheetname+"    where \
+                 Mark in (1,2) and InfoPublDate>="+startdate+" and \
+                 CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
+                 and SecuCategory=1 ) " 
         return data
     
-    def get_股本表(self,indicator1,indicator2=None,indicator3=None,indicator4=None,indicator5=None):
+    def get_股本表(self,indicators):
         '''
         获取 公司股本结构变动 LC_ShareStru 数据 最多可以获取5个字段
         '''
-        sql = "select CompanyCode,EndDate,InfoPublDate,"+indicator1+" from lc_sharestru\
+        indicators = str(indicators).replace("[","")
+        indicators = indicators.replace("]","")
+        indicators = indicators.replace("'","") 
+        sql = "select  CompanyCode,EndDate,InfoPublDate,"+indicators+" from lc_sharestru\
                 where CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
-                 and SecuCategory=1 )"
-        if indicator2 is not None:
-            sql = "select CompanyCode,EndDate,InfoPublDate,"+indicator1+","+indicator2+" from lc_sharestru\
-                   where CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
-                   and SecuCategory=1 )" 
-        if indicator3 is not None:
-            sql = "select CompanyCode,EndDate,InfoPublDate,"+indicator1+","+indicator2+","+indicator3+" from lc_sharestru\
-                   where CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
-                   and SecuCategory=1 )"
-        if indicator4 is not None:
-            sql = "select CompanyCode,EndDate,InfoPublDate,"+indicator1+","+indicator2+","+indicator3+","+indicator4+"\
-                  from lc_sharestru\
-                  where CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
-                  and SecuCategory=1 )"
-        if indicator5 is not None:
-            sql = "select CompanyCode,EndDate,InfoPublDate,"+indicator1+","+indicator2+","+indicator3+","+indicator4+"\
-                   ,"+indicator5+" from lc_sharestru\
-                  where CompanyCode in (SELECT CompanyCode from secumain where  SecuMarket in (83,90) \
-                  and SecuCategory=1 )"
+                 and SecuCategory=1 )  "
         ashares =  pd.read_sql(sql,con=self._dbengine)
         return ashares 
+    
     
    
     
