@@ -223,12 +223,15 @@ class get_quote:
         5. 单季现金流量表_新会计准则 LC_QCashFlowStatementNew
         6. 公司股本结构变动 LC_ShareStru
         7. 公司衍生报表数据_新会计准则（新） LC_FSDerivedData 备注：该表中涉及TTM的数据计算有问题，不用
+        8. 非经常性损益 LC_NonRecurringEvent 
         sheetname='LC_BalanceSheetAll'
         '''  
         if sheetname=='LC_QIncomeStatementNew' or  sheetname=='LC_QCashFlowStatementNew':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and Mark in (1,2)"
         elif sheetname=='LC_FSDerivedData':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfAdjusted in (1,2) "
+        elif sheetname=='LC_NonRecurringEvent':
+            sql = "select * from "+sheetname+" where ItemCode=32767 "
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1 and\
                     IfAdjusted in (1,2) "
@@ -264,6 +267,8 @@ class get_quote:
         elif sheetname=='LC_FSDerivedData':
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfAdjusted in (1,2)\
                     and  ID>"+id2+""
+        elif sheetname=='LC_NonRecurringEvent':
+            sql = "select * from "+sheetname+" where ItemCode=32767 and  ID>"+id2+" "
         else:
             sql = "select * from "+sheetname+" where AccountingStandards = 1 and IfMerged=1\
                     and IfAdjusted in (1,2) and ID>"+id2+""
@@ -301,7 +306,7 @@ class get_quote:
         print("指数成分股提取完毕....")
     
     def update_指数成分股(self):
-        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180101"')
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180201"')
         startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
         indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
         sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
@@ -403,6 +408,7 @@ if __name__ == '__main__':
 
     
     #当且仅当从头开始提取数据时运行，否则不运行,更新行情、指数及财务报表数据—------------------------
+    #360借壳江南嘉杰，SecuCode做了修改，因此碰到此类情况，需要重新运行提取数据；
 #     get.new_data('equity_quote',get.get_equityquote) #提取股票行情
 #     get.new_data('index_quote',get.get_indexquote) #提取指数行情
 #     get.get_指数成分股()
@@ -412,20 +418,22 @@ if __name__ == '__main__':
 #     get.get_财务表('LC_QIncomeStatementNew')
 #     get.get_财务表('LC_QCashFlowStatementNew')
 #     get.get_财务表('LC_FSDerivedData')
+     get.get_财务表('LC_NonRecurringEvent')
 
      #---数据更新-------------------------------------------------------------------------------    
-     get.update_指数成分股()   
-     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
-     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
-     get.update_财务股本表('LC_BalanceSheetAll')
-     get.update_财务股本表('LC_IncomeStatementAll')
-     get.update_财务股本表('LC_CashFlowStatementAll')
-     get.update_财务股本表('LC_QIncomeStatementNew')
-     get.update_财务股本表('LC_QCashFlowStatementNew') 
-     get.update_财务股本表('LC_FSDerivedData')    
-     get.get_bonus()
-     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
-     get.产业资本增减持() #产业资本增减持数据
+#     get.update_指数成分股()   
+#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
+#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
+#     get.update_财务股本表('LC_BalanceSheetAll')
+#     get.update_财务股本表('LC_IncomeStatementAll')
+#     get.update_财务股本表('LC_CashFlowStatementAll')
+#     get.update_财务股本表('LC_QIncomeStatementNew')
+#     get.update_财务股本表('LC_QCashFlowStatementNew') 
+#     get.update_财务股本表('LC_FSDerivedData')    
+#     get.update_财务股本表('LC_NonRecurringEvent')    
+#     get.get_bonus()
+#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+#     get.产业资本增减持() #产业资本增减持数据
      
      
      
