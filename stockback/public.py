@@ -20,6 +20,7 @@ import numpy as np
 import pymysql
 import datetime
 from tqdm import *
+import statsmodels.api as sm
     
 class public:
     '''
@@ -30,12 +31,6 @@ class public:
     '''
     
     def __init__(self): #连接聚源数据库
-#        self._dbengine =  pymysql.connect(host='backtest.invesmart.net',
-#                           port=3308,
-#                           user='jydb',
-#                           password='Jydb@123465',
-#                           database='jydb',
-#                           charset='gbk')
         self._dbengine =  pymysql.connect(host='192.168.1.139',
                            port=3306,
                            user='jydb',
@@ -45,41 +40,90 @@ class public:
         self.datapath  = "C:\\py_data\\datacenter\\quote.h5"   
         self.datapath2  = "C:\\py_data\\datacenter"   
     
-    def 秩标准化(self,data,indicator,inudstryname=None):
+    def series_因子中性化(self,quote_factor,indicator,industry,mktcap=None):
         '''
-        标准化，
-        inudstryname：非空时，行业内秩标准化
+        时间系列的因子中性化处理
+        1. 因子中位数去极值；
+        2. 因子标准
+        3. 以对数总市值+行业虚拟变量为X值，以因子值为Y值，进行中性化回归处理，去残差作为新的因子值
+        quote_factor = buylist2.loc[:,:]
+        industry = 'FirstIndustryName'
+        mktcap = '流通市值',若不为空，则进行市值中心化
+        zs:z_core,代表标准化
+        indicator = '扣非净利润同比的环比'
+        nt:nuetralize,代表进行行业、市值中性化处理
+        '''
+        quote_factor = quote_factor.sort_values(['TradingDay'])
+        quote_factor.index = range(len(quote_factor))
+        temp = pd.get_dummies(quote_factor[industry])
+        if  mktcap is not None:
+            columns = list(quote_factor[industry].drop_duplicates())+[mktcap]
+            temp = pd.merge(quote_factor[['SecuCode','TradingDay',indicator,mktcap]],temp,left_index=True,right_index=True)
+            temp[mktcap] = temp[mktcap].apply(lambda x:np.log(x))
+        else:
+            columns = list(quote_factor[industry].drop_duplicates())
+            temp = pd.merge(quote_factor[['SecuCode','TradingDay',indicator]],temp,left_index=True,right_index=True)
+        temp = temp.dropna(subset=[columns],how='any',axis=0)
+        temp = temp.dropna(subset=[indicator],how='any',axis=0)
+        temp.index = range(len(temp))
+        group = temp.groupby(['TradingDay']) #分日期
+        #因子去极值并进行标准化
+        z = group.apply(self.section_z_score标准化,indicator)
+        z = z.apply(lambda x:pd.Series(x))
+        z = z.stack()
+        temp['%s_zs'%indicator] = z.values
+        #中性化处理
+        temp['%s_nt'%indicator] = group.apply(self.section_regress,'%s_zs'%indicator,columns).values
+        quote_factor = pd.merge(quote_factor,temp[['SecuCode','TradingDay','%s_zs'%indicator,'%s_nt'%indicator]],on=['SecuCode','TradingDay'],how='left')
+        return quote_factor
+    
+    def section_regress(self,data,y,x):
+        '''
+        截面回归
+        '''
+        y = data[y]
+        x = data[x]
+        result = sm.OLS(y,x).fit()
+        return result.resid 
+    
+    def section_秩标准化(self,data,indicator,inudstryname=None):
+        '''
+        section:代表截面，标准化，
+        inudstryname：非空时，进行行业调整【不是标准化】再标准化
         data = temp_value
         indicator = 'pb'
+        对于某些因子，如股息率、PB等，行业之间差距很大，之间进行对比显然是不公平的，
+        那么比较好的方式是对该值进行行业调整，行业调整的思路如下：亿PB为例=个股PB/行业PB中位数 
         '''
         data['value'] = data[indicator].rank(pct=True)
         data['value'] = (data['value']- data['value'].mean())/ data['value'].std()
+        #行业调整，先进行标准化再打分
         if inudstryname is not None:
-            data['value'] = data.groupby([industryname])[indicator].rank(pct=True)
-            mean = data.groupby([industryname])[['value']].mean()
-            mean[industryname] = mean.index
-            data = pd.merge(data,mean,on=industryname,how='left')
-            std = data.groupby([industryname])[['value_x']].std()
-            std[industryname] = std.index
-            data = pd.merge(data,std,on=industryname,how='left')
-            data['value'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']   
+            median = data.groupby([industryname])[[indicator]].median()
+            median[industryname] = median.index
+            median['median'] = median[indicator]
+            data = pd.merge(data,median[[industryname,'median']],on=industryname,how='left')
+            data['value'] = data[indicator]/abs(data['median']) #行业调整
+            data['value'] = data['value'].rank(pct=True) #全市场标准化
+            data['value'] = (data['value']- data['value'].mean())/ data['value'].std()
         return data['value'].values
         
-    def z_score标准化(self,data,indicator,industryname):
+    def section_z_score标准化(self,data,indicator,industryname=None):
         '''
-        行业中性化处理，采取中位数去极值法
+        标准化处理，采取中位数去极值法
         indicator:需要有industyrname名称，返回处理后的data值
         data = temp_value
         indicator = '单季销售毛利率同比'
         industryname = 'FirstIndustryName'
+        inudstryname：非空时，进行行业标准处理，注意，不是行业调整，而是行业标准处理
         '''
         #中位数取极值法
-        median = abs(data[indicator] - data[indicator].median()).median()
-        data['value'] = np.where(data[indicator]>data[indicator] + 5*median,data[indicator] + 5*median,
-                            np.where(data[indicator] -5*median,data[indicator] -5*median,data[indicator]))
-        #标准化处理
+        median = data[indicator].median()
+        new_median = abs(data[indicator] - median).median()
+        #data['value'] = np.clip(data['value'],median-5*newmedian,median+median+5*new_median)
+        data['value'] = np.where(data[indicator]>median+5*new_median,median+5*new_median,
+                            np.where(data[indicator]<median-5*new_median,median-5*new_median,data[indicator]))
         data['value2'] = (data['value'] -data['value'].mean()) / data['value'].std()
-        
         #行业内Z_Score处理
         if industryname is not None:
             #中位数去极值法，进行极值处理
@@ -139,10 +183,19 @@ class public:
         lift = pd.read_hdf(self.datapath2+"\\info.h5",'lift',columns=[['InnerCode','InitialInfoPublDate','StartDateForFloating','Proportion1']])
         return info,st,listedstate,suspend,lift
     
+    def get_非常规数据(self,cyzb):
+        '''
+        产业资本增减持
+        '''
+        #获取产业资本净增减持数据
+        cyzb = pd.read_hdf(self.datapath2+"\\risk.h5",'cyzb',columns=['SecuCode','TradingDay','净增持比例'])
+        return cyzb
+        
+    
     def get_常规剔除(self,date,info,st,suspend,listedstate,days):
         '''
         info、st、suspend、listedstate分别为info数据、st数据、停复牌数据、上市状态变更数据
-        date:当期的日期
+        date='20180111':当期的日期
         days:上市天数
         每一期选股的常规剔除模型,返回剔除以下后的股票信息
         1. 上市日期大于listeddays 默认365天
@@ -161,6 +214,7 @@ class public:
         temp_st = temp_st[~temp_st['SpecialTradeType'].isin((2,4,6))]
         #停牌股票
         temp_suspend = suspend[date>=suspend['InfoPublDate']]
+        aa = temp_suspend[temp_suspend['InnerCode']==1432]
         temp_suspend = temp_suspend.drop_duplicates(['InnerCode'],keep='last')
         temp_suspend = temp_suspend[(date<=temp_suspend['ResumptionDate'])|(temp_suspend['ResumptionDate']=='19000101')]
         #退市、暂停交易等股票
@@ -178,12 +232,14 @@ class public:
     def get_非常规剔除(self,date,info,lift=None):
         '''
         info为常规剔除后的标的池
+        lift = aa.loc[:,:]
+        date = datetime.datetime(2018,1,12)
         '''
         temp_info = info
         if lift is not None:
             #解禁,解禁前2个月，后40天，比例占流通股本超过8%的个股进行剔除
             temp_lift = lift[(date>=lift['InitialInfoPublDate'])]
-            temp_lift = temp_lift[(date<=temp_lift['InitialInfoPublDate']+datetime.timedelta(40))&(date>=temp_lift['StartDateForFloating']-datetime.timedelta(60))]
+            temp_lift = temp_lift[(date>=(temp_lift['StartDateForFloating']-datetime.timedelta(60)))&(date<=temp_lift['StartDateForFloating']+datetime.timedelta(40))]
             temp_lift = temp_lift[temp_lift['Proportion1']>8]
             temp_info = temp_info[~temp_info['InnerCode'].isin(temp_lift['InnerCode'])]
         return temp_info
@@ -272,8 +328,7 @@ class public:
         data['temp'] = data[indicator]
         data = pd.merge(data,data[['CompanyCode','EndDate','temp']],left_on=['predate','CompanyCode'],
                                 right_on = ['EndDate','CompanyCode'],how='left')
-        data['单季值'] = np.where(((data['month']==3)|(data['month']==12)),data[indicator],
-                            data[indicator]-data['temp_y'])
+        data['单季值'] = np.where(data['month']==3,data[indicator],data[indicator]-data['temp_y'])
         return data['单季值'].values
 
         
@@ -311,6 +366,7 @@ class public:
         4. 单季利润表_新会计准则 LC_QIncomeStatementNew
         5. 单季现金流量表_新会计准则 LC_QCashFlowStatementNew
         6. 公司股本变动表 LC_ShareStru
+        7. 非经常性损益 LC_NonRecurringEvent 
         '''
         names = list(['InfoPublDate','CompanyCode','EndDate'])
         names.extend(columns)
@@ -318,6 +374,7 @@ class public:
             data = pd.read_hdf(self.datapath2+'\\info.h5','LC_ShareStru',where="InfoPublDate>="+startdate+"",columns=names)
         else:
             data = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,'data',where="InfoPublDate>="+startdate+"",columns=names)
+        
         return data
         
     
@@ -330,6 +387,7 @@ class public:
         time0 = buylist[['TradingDay']].drop_duplicates()
         quote0 = quote[quote['TradingDay'].isin(time0['TradingDay'])]
         quote0 = quote0.sort_values(['SecuCode','TradingDay'])
+        
         quote0['rtn'] = np.where(quote0['SecuCode']==quote0['SecuCode'].shift(1),
                               quote0['fq_cp'] /quote0['fq_cp'].shift(1)-1,np.nan)
         quote0['next_rtn'] = np.where(quote0['SecuCode']==quote0['SecuCode'].shift(-1),
@@ -359,6 +417,20 @@ class public:
         corr1 = pd.DataFrame([[date,corr.mean()[1],corr.mean()[2]]]).append(corr)   
         corr2 = pd.DataFrame([[date,corr.mean()[1]/corr.std()[1],corr.mean()[2]/corr.std()[2]]]).append(corr1)   
         return corr2
+    
+    def insert_signal(self,buylist3):
+        '''
+        临时程序，加入宏观择时信号，还需要完善改进
+        buylist4,每期选股，需要有weight字段,默认从20130101开始
+        '''
+        signal = pd.read_excel("C:\\Users\\dylan\\Desktop\\嘉实工作2\\指数部课题\宏观择时日信号.xlsx")
+        signal.index = signal['m_date']
+        buylist4 = pd.merge(buylist3,signal[['signal']],left_index=True,right_index=True,how='left')
+        buylist4['signal'] = buylist4['signal'].fillna(1)
+        buylist4['weight'] = 1/buylist4.groupby(['TradingDay'])['SecuCode'].count()
+        buylist4['weight'] = np.where(buylist4['signal']==0,buylist4['weight']*0.3,buylist4['weight'])
+        buylist4 = buylist4[buylist4.index>='20121228']
+        return buylist4
         
         
         
