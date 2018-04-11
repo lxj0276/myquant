@@ -104,7 +104,7 @@ class trade:
         real_goal_buycash = self.init_cash * buylist['weight']
         holdvol = pd.concat([np.floor(real_goal_buycash / buylist[self.tradeprice] / (1+self.feeratio) / self.unit),
                              buylist['vol'] * self.volratio],axis=1)
-        holdvol = holdvol.min(axis=1)
+        holdvol = holdvol.fillna(0).min(axis=1)
         holddays = holdvol / holdvol
         real_buycash = holdvol * self.unit * buylist[self.tradeprice]      
         tradefee = real_buycash * self.feeratio
@@ -159,7 +159,7 @@ class trade:
             real_goal_buycash = self.adjust_goal_buycash(goal_buycash,buylist) #涨停股票的今日买入金额为0
             add_holdvol =  pd.concat([np.floor(real_goal_buycash / buylist[self.tradeprice] / (1+self.feeratio) / self.unit),
                                                buylist['vol'] * self.volratio],axis=1)
-            add_holdvol = add_holdvol.min(axis=1)
+            add_holdvol = add_holdvol.fillna(0).min(axis=1)
             holdvol = holdvol + add_holdvol  
             real_buycash = add_holdvol * self.unit * buylist[self.tradeprice]
             tradefee = real_buycash * self.feeratio
@@ -242,7 +242,8 @@ class trade:
         stockvalue = keep_holdvol * buylist[self.tradeprice] * self.unit
         new_goal_buycash = wait_buycash['diff_cash']
         new_goal_buycash[new_goal_buycash<0] = 0    
-        if  new_goal_buycash.max() >= self.min_wait_buycash:             
+        if  new_goal_buycash.max() >= self.min_wait_buycash:   
+        #if  new_goal_buycash.max() >= 0:  
             #涨停股票权重设为0，即不买入
             buylist['weight'] =  np.where(buylist['cp']>=(1+self.daily_limit)*buylist['precp']-0.01,0,buylist['weight'])
             
@@ -252,7 +253,7 @@ class trade:
             real_goal_buycash = min(surplus_cash,new_goal_buycash.sum()) * day_weight['diff_cash']
             add_holdvol =  pd.concat([np.floor(real_goal_buycash / buylist[self.tradeprice] / (1+self.feeratio) / self.unit),
                                          buylist['vol'] * self.volratio],axis=1)
-            add_holdvol = add_holdvol.min(axis=1)
+            add_holdvol = add_holdvol.fillna(0).min(axis=1)
             holdvol = pd.merge(pd.DataFrame(keep_holdvol),pd.DataFrame(add_holdvol),left_index=True,right_index=True,how='outer')
             holdvol = holdvol.fillna(0)
             holdvol = holdvol.sum(axis=1)
@@ -272,12 +273,14 @@ class trade:
                 tradedetail['剩余目标金额'] = wait_buycash
                 tradedetail = tradedetail.append(sell_tradedetail)
         else:
-            holdvol = keep_holdvol
+            holdvol = keep_holdvol *(1+buylist[self.tradeprice]-buylist[self.tradeprice]).fillna(1)
+            holdvol = holdvol.fillna(0)
             wait_buycash = pd.Series(wait_buycash['diff_cash'].values,index=wait_buycash['diff_cash'].index)
             
         
         asset = stockvalue.sum() + sell_stockvalue.sum() + surplus_cash
-        tradefee = tradefee + sell_tradefee         
+        tradefee = tradefee + sell_tradefee        
+       
         return asset,tradefee,surplus_cash,holdvol,sell_holdvol,wait_buycash,stockvalue,sell_stockvalue,holddays,sell_holddays,tradedetail
               
         
@@ -290,7 +293,7 @@ class trade:
         day_sell_holdvol[0] = np.where(day_sell_holdvol['cp']<=(1-self.daily_limit)*day_sell_holdvol['precp'] + 0.01
                                         ,0,day_sell_holdvol[0])  #跌停判断,跌停不卖出
         day_sell_holdvol = day_sell_holdvol.drop(labels=['cp','precp'],axis=1)
-        day_sell_holdvol = day_sell_holdvol.min(axis=1)
+        day_sell_holdvol = day_sell_holdvol.fillna(0).min(axis=1)
         surplus_holdvol = sell_holdvol - day_sell_holdvol
         sell_cash = day_sell_holdvol * sell_quote[self.tradeprice] * self.unit
         sell_tradefee = (sell_cash * self.feeratio).sum()
@@ -444,7 +447,7 @@ class trade:
             day_buy = buylist[buylist.index==nowtime]
             day_buy.index = day_buy['SecuCode']
             #当买入的天数不足最小持有天数数，则本次调仓不卖出，把不卖出的股票添加到买入列表，并且signal_rank设置成最小，既最优先买入
-            cannot_sellstock = holddays[holddays<=self.min_holddays]
+            cannot_sellstock = holddays[holddays<self.min_holddays]
             buystock = day_buy.index
             if len(cannot_sellstock) > 0:
                 buystock =  cannot_sellstock.index.append(day_buy.index)
@@ -637,12 +640,12 @@ class trade:
         tradedetail0 = pd.merge(name_info,tradedetail0,right_index=True,left_on='SecuCode',how='right')      
         
         #保存成交明细到excel
-#        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
-#            asset.to_excel(writer,u'asset')           
-#            sell_holdvol.to_excel(writer,'待卖出股票情况')           
-#            sell_holddays0.to_excel(writer,'股票持仓天数统计')
-#            tradedetail0.to_excel(writer,"每日成交明细")
-#            holdvol.to_excel(writer,"每日持仓明细")
+        with pd.ExcelWriter("C:\\py_data\\textdata\\text.xlsx") as writer:
+            asset.to_excel(writer,u'asset')           
+            sell_holdvol.to_excel(writer,'待卖出股票情况')           
+            sell_holddays0.to_excel(writer,'股票持仓天数统计')
+            tradedetail0.to_excel(writer,"每日成交明细")
+            holdvol.to_excel(writer,"每日持仓明细")
         
         return asset,holdvol,sell_holdvol,tradedetail0,sell_holddays0 
     
@@ -769,11 +772,11 @@ class trade:
             performance.columns = ['策略','超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]
             m_nav.columns = ['策略收益','%s收益'%benchmakr_name,'超额收益[%s]'%benchmakr_name,'多空收益[%s]'%benchmakr_name]    
         #保存到excel
-        with pd.ExcelWriter("C:\\py_data\\textdata\\%s_performance.xlsx"%sort_name) as writer:            
-            performance.to_excel(writer,"策略表现")
-            m_nav.to_excel(writer,"收益率曲线")
-            month_sy.to_excel(writer,"每月收益")     
-            year_turnover.to_excel(writer,"换手率情况")
+#        with pd.ExcelWriter("C:\\py_data\\textdata\\%s_performance.xlsx"%sort_name) as writer:            
+#            performance.to_excel(writer,"策略表现")
+#            m_nav.to_excel(writer,"收益率曲线")
+#            month_sy.to_excel(writer,"每月收益")     
+#            year_turnover.to_excel(writer,"换手率情况")
             
         
         return performance,m_nav                                    
