@@ -527,12 +527,12 @@ class factor_evaluate():
         
     
 if __name__ == "__main__":
-#    gp = factor_evaluate('m','20091231','20171231') 
-#    benchmark_code= '399317' 
-#    import time
-#    t0 = time.time()
-#    #获取基准用数据
-#    benchmark_quote,quote_ic,quote_group = gp.get_基础数据(benchmark_code)
+    gp = factor_evaluate('m','20141231','20171231') 
+    benchmark_code= '399317' 
+    import time
+    t0 = time.time()
+    #获取基准用数据
+    benchmark_quote,quote_ic,quote_group = gp.get_基础数据(benchmark_code)
     #获取单个因子绩效  
     t1 = time.time()
     ic_corr,ic,ic_decay,net,performance,year_sy,month_sy = \
