@@ -703,8 +703,8 @@ class trade:
         alpha_std = 100 * (np.exp(alpha)-1).std() * np.sqrt(250)
         info_ratio = alpha_sy / alpha_std
         alpha_m_rtn = alpha.resample('m').sum()
-        alpha_m_ratio =  100 *alpha_m_rtn[alpha_m_rtn>0].count()/alpha_m_rtn.count()
-        alpha_win_vs_loss = 100 * (-1*alpha_m_rtn[alpha_m_rtn>0].mean() / alpha_m_rtn[alpha_m_rtn<0].mean())
+        alpha_m_ratio =  100 *alpha_m_rtn[alpha_m_rtn>1].count()/alpha_m_rtn.count()
+        alpha_win_vs_loss = 100 * (-1*alpha_m_rtn[alpha_m_rtn>1].mean() / alpha_m_rtn[alpha_m_rtn<1].mean())
         
         alpha_performance = pd.DataFrame(np.array([benchmark_sy,alpha_sum_sy,alpha_sy,alpha_std,alpha_maxdrawdown,info_ratio,alpha_m_ratio,alpha_win_vs_loss]),
                                index=['总收益/基准累计收益','总收益/超额','年化收益率/超额','年化波动率/超额','最大回撤/超额','夏普/信息比率','月度胜利率/超额','月度平均盈亏比/超额'])
@@ -747,8 +747,8 @@ class trade:
         sy = 100 * (pow(np.exp(rtn.sum()),250/rtn.count()) - 1 )
         sharpratio = (sy - 3) / std
         m_rtn = rtn.resample('m').sum()
-        m_ratio = 100 *m_rtn[m_rtn>0].count()/m_rtn.count()
-        win_vs_loss = 100 * (-1*m_rtn[m_rtn>0].mean() / m_rtn[m_rtn<0].mean())
+        m_ratio = 100 *m_rtn[m_rtn>1].count()/m_rtn.count()#月度胜利率
+        win_vs_loss = 100 * (-1*m_rtn[m_rtn>1].mean() / m_rtn[m_rtn<1].mean())#月度盈亏比
         turnover = 100 * (data['手续费']/self.feeratio/data['净值']).sum()*250/rtn.count() / 2
         
         performance = pd.DataFrame(np.array([sum_sy,sum_sy,sy,std,maxdrawdown,sharpratio,turnover,m_ratio,win_vs_loss]),

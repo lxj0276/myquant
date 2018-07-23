@@ -20,8 +20,7 @@ tradedetail = pd.DataFrame()
 holddays = pd.merge(pd.DataFrame(holddays),pd.DataFrame(day_buylist['cp']/day_buylist['cp']),left_index=True,right_index=True,how='outer')
 holddays = holddays.fillna(0)
 holddays = holddays.sum(axis=1)
-holddays = holddays[holddays.index.isin(day_buylist.index)]
-sell_holddays = holddays[~holddays.index.isin(day_buylist.index)]
+
 
 #原有持仓，没有发出卖出信号，但权重需要重新调整
 wait_buycash = pd.DataFrame(asset * day_buylist['weight'])
@@ -52,9 +51,6 @@ if len(keep_holdvol) > 0:#持仓reblance部分
 else:
     wait_buycash['diff_cash'] = wait_buycash.values
 if len(sell_holdvol) > 0:
-    day = datetime.datetime.strftime(day_buylist['TradingDay'][-1],"%Y%m%d")
-    sell_quote = pd.read_hdf(datapath,'equity_quote',columns=['SecuCode','cp','precp','vol'],
-                             where='TradingDay=%s'%day)
     sell_quote = sell_quote[sell_quote['SecuCode'].isin(sell_holdvol.index)]
     sell_quote.index=sell_quote['SecuCode']
     surplus_cash,sell_tradefee,sell_stockvalue,sell_holdvol,day_sell_holdvol,sell_cash =  sell_trade(sell_holdvol,sell_quote,surplus_cash)
@@ -62,7 +58,7 @@ if len(sell_holdvol) > 0:
         sell_tradedetail = pd.DataFrame(day_sell_holdvol.values,columns=['卖出成交数量'],index=day_sell_holdvol.index)
         sell_tradedetail['卖出成交金额'] = sell_cash
 #新发出信号买入股票的程序
-stockvalue = keep_holdvol * day_buylist[tradeprice] * unit
+stockvalue = keep_holdvol * day_buylist[day_buylist.index.isin(keep_holdvol.index)][tradeprice] * unit
 new_goal_buycash = wait_buycash['diff_cash']
 new_goal_buycash[new_goal_buycash<0] = 0    
 if  new_goal_buycash.max() >= min_wait_buycash:             
@@ -74,7 +70,7 @@ if  new_goal_buycash.max() >= min_wait_buycash:
     real_goal_buycash = surplus_cash * day_weight['diff_cash']
     add_holdvol =  pd.concat([np.floor(real_goal_buycash / day_buylist[tradeprice] / (1+feeratio) / unit),
                                  day_buylist['vol'] * volratio],axis=1)
-    add_holdvol = add_holdvol.min(axis=1)
+    add_holdvol = add_holdvol.fillna(0).min(axis=1)
     holdvol = pd.merge(pd.DataFrame(keep_holdvol),pd.DataFrame(add_holdvol),left_index=True,right_index=True,how='outer')
     holdvol = holdvol.fillna(0)
     holdvol = holdvol.sum(axis=1)
@@ -94,9 +90,12 @@ if  new_goal_buycash.max() >= min_wait_buycash:
         tradedetail['剩余目标金额'] = wait_buycash
         tradedetail = tradedetail.append(sell_tradedetail)
 else:
-    holdvol = keep_holdvol
+    holdvol = keep_holdvol *(1+buylist[self.tradeprice]-buylist[self.tradeprice]).fillna(1)
+    holdvol = holdvol.fillna(0)
     wait_buycash = pd.Series(wait_buycash['diff_cash'].values,index=wait_buycash['diff_cash'].index)
-    
+            
+holddays = holddays[holddays.index.isin(holdvol.index)]
+sell_holddays = holddays[~holddays.index.isin(holdvol.index)]
 
 asset = stockvalue.sum() + sell_stockvalue.sum() + surplus_cash
-tradefee = tradefee + sell_tradefee      
+tradefee = tradefee + sell_tradefee         

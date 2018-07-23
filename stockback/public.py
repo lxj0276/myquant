@@ -183,19 +183,20 @@ class public:
         lift = pd.read_hdf(self.datapath2+"\\info.h5",'lift',columns=[['InnerCode','InitialInfoPublDate','StartDateForFloating','Proportion1']])
         return info,st,listedstate,suspend,lift
     
-    def get_非常规数据(self,cyzb):
+    def get_非常规数据(self):
         '''
         产业资本增减持
         '''
         #获取产业资本净增减持数据
         cyzb = pd.read_hdf(self.datapath2+"\\risk.h5",'cyzb',columns=['SecuCode','TradingDay','净增持比例'])
+        pledge = pd.read_hdf(self.datapath2+"\\info.h5",'pledge')
         return cyzb
         
     
     def get_常规剔除(self,date,info,st,suspend,listedstate,days):
         '''
         info、st、suspend、listedstate分别为info数据、st数据、停复牌数据、上市状态变更数据
-        date='20180111':当期的日期
+        date='20180511':当期的日期
         days:上市天数
         每一期选股的常规剔除模型,返回剔除以下后的股票信息
         1. 上市日期大于listeddays 默认365天
@@ -213,8 +214,7 @@ class public:
         temp_st = temp_st.drop_duplicates(['InnerCode'],keep='last')
         temp_st = temp_st[~temp_st['SpecialTradeType'].isin((2,4,6))]
         #停牌股票
-        temp_suspend = suspend[date>=suspend['InfoPublDate']]
-        aa = temp_suspend[temp_suspend['InnerCode']==1432]
+        temp_suspend = suspend[(date>=suspend['InfoPublDate'])|(date>=suspend['SuspendDate'])]
         temp_suspend = temp_suspend.drop_duplicates(['InnerCode'],keep='last')
         temp_suspend = temp_suspend[(date<=temp_suspend['ResumptionDate'])|(temp_suspend['ResumptionDate']=='19000101')]
         #退市、暂停交易等股票
@@ -229,19 +229,33 @@ class public:
         temp_info = temp_info[~temp_info['InnerCode'].isin(temp_listedstate['InnerCode'])]
         return temp_info
     
-    def get_非常规剔除(self,date,info,lift=None):
+    def get_非常规剔除(self,date,info,lift=None,pledge=None,cyzb=None):
         '''
         info为常规剔除后的标的池
-        lift = aa.loc[:,:]
+        temp_pledge = data.loc[:,:]
         date = datetime.datetime(2018,1,12)
         '''
         temp_info = info
         if lift is not None:
             #解禁,解禁前2个月，后40天，比例占流通股本超过8%的个股进行剔除
             temp_lift = lift[(date>=lift['InitialInfoPublDate'])]
-            temp_lift = temp_lift[(date>=(temp_lift['StartDateForFloating']-datetime.timedelta(60)))&(date<=temp_lift['StartDateForFloating']+datetime.timedelta(40))]
-            temp_lift = temp_lift[temp_lift['Proportion1']>8]
+            temp_lift = temp_lift[(date>=(temp_lift['StartDateForFloating']-datetime.timedelta(60)))&(date<=temp_lift['StartDateForFloating']+datetime.timedelta(100))]
+            temp_lift = temp_lift[temp_lift['Proportion1']>5]
             temp_info = temp_info[~temp_info['InnerCode'].isin(temp_lift['InnerCode'])]
+        if pledge is not None:
+            #质押比例,占总股本比不超过25%
+            temp_pledge = pledge[(date>=pledge['InfoPublDate'])&(date>=pledge['StartDate'])]
+            temp_pledge['dt_e'] = temp_pledge['EndDate'] + datetime.timedelta(60)#质押结束后2个月仍算比例
+            temp_pledge  = temp_pledge[(date<temp_pledge['dt_e'])|(pd.isnull(temp_pledge['EndDate'])==True)]
+            pledge_ratio = temp_pledge.groupby(['CompanyCode'])[['PCTOfTotalShares']].sum()
+            pledge_ratio = pledge_ratio[pledge_ratio['PCTOfTotalShares']>0.25] 
+            temp_info = temp_info[~temp_info['CompanyCode'].isin(pledge_ratio['CompanyCode'])]
+            #pledge_ratio = pd.merge(pledge_ratio,info,left_index=True,right_on=['CompanyCode']) 
+            #pledge_ratio.to_excel("C:\\Users\\dylan\\Desktop\\临时文档\\质押.xlsx")
+        if cyzb is not None:
+            #产业资本净减持超过千分之一
+            temp_cyzb = cyzb[(date<=cyzb['TradingDay']+datetime.timedelta(30))&(date>=cyzb['TradingDay'])]
+            temp_cyzb = temp_cyzb[temp_cyzb['净增持比例']<-0.1]
         return temp_info
         
     
@@ -347,12 +361,18 @@ class public:
         industry = industry.sort_values(['CompanyCode','InfoPublDate'],ascending=True) #排序
         return industry
     
-    def get_指数成分股(self,Index_SecuCode):
+    def get_指数成分股(self,Index_SecuCode,gettype=None):
         '''
         指数成分股，Index_SecuCode为指数的代码
         '''
         Index_SecuCode = str(tuple(Index_SecuCode))
         constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data',where="Index_SecuCode in "+Index_SecuCode+"") 
+        if gettype == 'daily':
+            if Index_SecuCode == '000300':
+                 constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data',where="Index_SecuCode in "+Index_SecuCode+"")    
+            else:
+                constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data2',where="Index_SecuCode in "+Index_SecuCode+"") 
+             
         constituent = constituent.sort_values(['EndDate','Index_SecuCode'],ascending=True) #排序
         return constituent
     
@@ -395,6 +415,28 @@ class public:
         buylist0 = buylist.sort_values(['TradingDay','SecuCode'])
         buylist0  = pd.merge(buylist0,quote0[['TradingDay','SecuCode','next_rtn']],on=['SecuCode','TradingDay'],how='left')
         return buylist0
+    
+    def get_事件驱动统计(self,data,quote,index_quote=None):
+        '''
+        事件发生日，后续的行情统计
+        '''
+        quote4 = quote[['TradingDay','SecuCode','fq_cp','precp','cp','vol']]
+        quote4['ifhalt'] = np.where((quote4['SecuCode']==quote4['SecuCode'].shift(-1))&(quote4['vol']==0),1,0)
+        quote4['ifzhangting'] = np.where((quote4['SecuCode']==quote4['SecuCode'].shift(-1))&(quote4['cp']<=0.9*quote4['precp'] + 0.01),1,0)
+        
+
+        quote4 = pd.merge(qutoe4,index_quote,on='TradingDay',how='left')
+            
+        #quote4['logrtn'] = quote4['cp']/quote4['precp']
+        maxdate =  20990101 
+        maxdays = 24 #默认月度数据，则每个月最大交易天数为23天
+        days = [1,3,5,10,20,40,60,]
+        for i in days:#收益&日期
+            quote4['rtn%s'%str(i)] = np.where(quote4['SecuCode']==quote4['SecuCode'].shift(-i),quote4['fq_cp'].shift(-i)/quote4['fq_cp']-1,np.nan)
+            quote4['alpha%s'%str(i)] = np.where(quote4['SecuCode']==quote4['SecuCode'].shift(-i),
+                      quote4['fq_cp'].shift(-i)/quote4['fq_cp']-quote4['index_cp'].shift(-i)/quote4['index_cp'],np.nan)
+        
+        print("事件驱动统计完毕...")
           
     
     def ic_rtnk(self,buylist0,factor):
@@ -418,6 +460,121 @@ class public:
         corr2 = pd.DataFrame([[date,corr.mean()[1]/corr.std()[1],corr.mean()[2]/corr.std()[2]]]).append(corr1)   
         return corr2
     
+    def get_缓冲买入股票(self,data,number):
+        '''
+        data：datafarame,需要有TradingDay，SecuCode,SecuAbrr,signal_rank字段
+        number=80：每一期的买入数量，如80
+        对于buylist中有120只股票，只想买入100只股票的情况
+        也就是有缓冲作用，上一期的100名，掉出120名之后再卖出，否则继续持有
+        data = buylist4.iloc[:10000]
+        '''
+        time = data[['TradingDay']].drop_duplicates()      
+        time['pretime'] =  time['TradingDay'].shift(1)
+        data2 = pd.merge(data,time,on=['TradingDay'],how='left')
+        data3 = pd.merge(data2,data2[['TradingDay','SecuCode','signal_rank']],left_on=['pretime','SecuCode'],right_on=['TradingDay','SecuCode'],how='left')
+        data3['signal_rank'] = np.where(pd.isnull(data3['signal_rank_y'])==True,data3['signal_rank_x'],0)
+        #本期大于100的
+        data3['TradingDay'] = data3['TradingDay_x'] 
+        data3 = data3.sort_values(['TradingDay_x','signal_rank','signal_rank_x'],ascending=[True,True,True])
+        data3['signal_rank'] = data3.groupby(['TradingDay'])['signal_rank'].rank(method='first')
+        data3 = data3.drop(['TradingDay_x','TradingDay_y','signal_rank_x','signal_rank_y','pretime'],axis=1)
+        data3 = data3[data3['signal_rank']<=number]
+        return data3
+    
+    def get_指定权重(self,data,TotalShares,index_code,industry_type,weight_type=None,fill=False):
+        '''
+        data=buylist4：datafarame,需要有TradingDay，SecuCode,SecuAbrr,FirstIndustryName或者SecondIndustryName
+        TotalShares:包含'AFloats','TotalShares'字段
+        index_code='000905':需要复制的指数权重
+        industry_type = 'sw'
+        weight_type：默认行业内等权重，还有
+                市值权重:z_zsz:总市值从大小排序，越大比率越高；f_zsz:总市值由小到大排序；
+                成交金额权重:z_cje,成交额由大到小排序;f_cje，成交额由小到大排序
+        fill：本期买股股票权重加总是否等于1，False:默认可以不等于1，True:必须等于1，针对某些行业没有入选，
+                是用现金替代，还是把权重平均分配给其他行业的问题。
+        '''  
+        info = pd.read_hdf(self.datapath2+"\\info.h5",'info',columns=['InnerCode','SecuCode','CompanyCode'])
+        
+        if industry_type == 'zx':
+            industry = self.get_industry('(3)') #中信行业
+        else:
+            industry = self.get_industry('(9,24)') #申万行业
+        times = data['TradingDay'].drop_duplicates()
+        buylist = pd.DataFrame()
+        for i in tqdm(times):
+            date = datetime.datetime.strftime(i,"%Y%m%d")
+            
+            temp_TotalShares = TotalShares[(i>=TotalShares['InfoPublDate'])&(i>=TotalShares['EndDate'])]
+            temp_TotalShares = temp_TotalShares.drop_duplicates(['CompanyCode'],keep='last')  
+           
+           
+            hy = industry[(i>=industry['InfoPublDate'])]      
+            hy = industry.drop_duplicates(subset=['CompanyCode'],keep='last')#保留最新行业分类
+            constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data2',
+                                       where=" EndDate="+date+" and Index_SecuCode='"+index_code+"'") 
+            constituent = pd.merge(constituent,info[['InnerCode','CompanyCode','SecuCode']],on='InnerCode') 
+            constituent = pd.merge(constituent,temp_TotalShares[['CompanyCode','AFloats','TotalShares']],on='CompanyCode') 
+            constituent = pd.merge(constituent,hy[['CompanyCode','FirstIndustryName']],on='CompanyCode') 
+            
+            temp_weight = constituent.groupby(['FirstIndustryName'])[['Weight']].sum()
+            temp_weight['FirstIndustryName']  = temp_weight.index 
+            
+            temp_data = data[data['TradingDay']==i]
+            temp_data = pd.merge(temp_data,info[['InnerCode','CompanyCode','SecuCode']],on='SecuCode')
+            temp_data = pd.merge(temp_data,hy[['FirstIndustryName','CompanyCode']],on='CompanyCode')       
+            temp_data = pd.merge(temp_data,temp_weight[['FirstIndustryName','Weight']],on='FirstIndustryName')       
+                  
+            temp_count =   temp_data.groupby(['FirstIndustryName'])[['CompanyCode']].count()  
+            temp_count['count'] = temp_count['CompanyCode']
+            temp_count['FirstIndustryName'] = temp_count.index
+            temp_data = pd.merge(temp_data,temp_count[['FirstIndustryName','count']],on='FirstIndustryName')       
+            temp_data['weight'] = temp_data['Weight'] / temp_data['count'] /100
+            constituent['FirstIndustryName'].drop_duplicates().count()
+            constituent['FirstIndustryName'].count()
+            if weight_type is not None:
+                temp_quote = pd.read_hdf(self.datapath,'equity_quote',columns=['CompanyCode','cp','TurnoverValue'] ,where='TradingDay=%s'%date) 
+                temp_data = pd.merge(temp_data,temp_quote,on='CompanyCode') 
+                temp_data = pd.merge(temp_data,temp_TotalShares[['CompanyCode','TotalShares','AFloats']],on='CompanyCode')       
+                temp_data['总市值'] = np.log(temp_data['TotalShares'] * temp_data['cp'])
+                temp_data['流通市值'] = np.log(temp_data['AFloats'] * temp_data['cp'])
+                temp_data['成交额'] = np.log(temp_data['TurnoverValue'])
+                temp_data['排序'] = np.log(temp_data.groupby(['TradingDay','FirstIndustryName'])['signal_rank'].rank(ascending=False)+1)
+                temp_sum =   temp_data.groupby(['FirstIndustryName'])[['TotalShares']].sum()  
+                temp_count['count'] = temp_count['CompanyCode']
+                temp_sum =    temp_data.groupby(['FirstIndustryName'])[['总市值']].sum()   
+                temp_sum['FirstIndustryName'] = temp_sum.index
+                temp_sum['流通市值和'] =    temp_data.groupby(['FirstIndustryName'])[['流通市值']].sum()   
+                temp_sum['总市值和'] =   temp_sum['总市值']
+                temp_sum['成交金额和'] =    temp_data.groupby(['FirstIndustryName'])[['成交额']].sum()
+                temp_sum['排序和'] =    temp_data.groupby(['FirstIndustryName'])[['排序']].sum()
+                 
+                temp_data = pd.merge(temp_data,temp_sum[['FirstIndustryName','流通市值和','总市值和','成交金额和','排序和']],on='FirstIndustryName')       
+                
+                temp_data['weight'] = temp_data['Weight']/100 * ( temp_data['总市值']/ temp_data['总市值和'])
+                if weight_type == 'f_zsz':
+                    temp_data['weight'] = temp_data['Weight']/100 * ( 1-temp_data['总市值']/ temp_data['总市值和'])
+                if weight_type == 'z_ltsz':
+                    temp_data['weight'] = temp_data['Weight']/100 * ( temp_data['流通市值']/ temp_data['流通市值和'])
+                if weight_type == 'f_ltsz':
+                    temp_data['weight'] = temp_data['Weight']/100 * ( 1-temp_data['流通市值']/ temp_data['流通市值和'])
+                if weight_type == 'z_cje':    
+                    temp_data['weight'] = temp_data['Weight']/100 * ( np.log(temp_data['TurnoverValue'])/ temp_data['成交金额和'])
+                if weight_type == 'f_cje':    
+                    temp_data['weight'] = temp_data['Weight']/100 * ( 1-np.log(temp_data['TurnoverValue'])/ temp_data['成交金额和'])
+                if weight_type == 'rank':
+                    temp_data['weight'] = temp_data['Weight']/100 * (  temp_data['排序'] / temp_data['排序和'])
+                
+                
+                #某些行业没有持仓，那么把剩余仓位平均分配到现有的行业
+            if fill == True: #为True的话
+                weight = temp_data.drop_duplicates(subset=['FirstIndustryName'])['Weight'].sum()
+                temp_data['weight'] = 100 / weight *  temp_data['weight']
+           
+            buylist = buylist.append(temp_data)
+        buylist2 = buylist[['TradingDay', 'SecuCode', 'SecuAbbr', 'signal_rank', 'weight']] 
+        buylist2.index = buylist2['TradingDay']
+        return buylist2
+      
     def insert_signal(self,buylist3):
         '''
         临时程序，加入宏观择时信号，还需要完善改进

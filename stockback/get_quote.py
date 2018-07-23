@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import pymysql
 import datetime
+from tqdm import *
 
 class get_quote:
     '''
@@ -162,7 +163,7 @@ class get_quote:
         '''
         sql = "select b.SecuCode,b.CompanyCode,a.* from LC_SuspendResumption as a\
                 INNER JOIN  (select * from secumain where SecuMarket in (83,90) and\
-                SecuCategory =1) as b  on a.innercode=b.innercode order by InnerCode,ResumptionDate,InfoPublDate"
+                SecuCategory =1) as b  on a.innercode=b.innercode order by InnerCode,SuspendDate,InfoPublDate"
         suspend = pd.read_sql(sql,con=self._dbengine1)
         return suspend    
     
@@ -192,6 +193,14 @@ class get_quote:
         data = pd.read_sql(sql,con=self._dbengine1)
         return data
     
+    def get_质押表(self):
+        sql = "select CompanyCode, InfoPublDate, InvolvedSum,PCTOfPledger, PCTOfTotalShares, StartDate, EndDate\
+                from LC_ShareFP where CompanyCode in (SELECT CompanyCode from\
+                    secumain where  SecuMarket in (83,90) and SecuCategory=1 )"
+        data = pd.read_sql(sql,con=self._dbengine1)
+        data['EndDate'] = data['EndDate'].astype(data['InfoPublDate'].dtype)
+        return data
+    
     def info_to_hdf(self):
         
         listedstate = self.get_上市状态变更() #输出被退市和暂停上市的股票
@@ -202,6 +211,7 @@ class get_quote:
         LC_ShareStru = self.get_股本表() 
         industry = self.get_industry() #行业表
         lift = self.get_解禁表()
+        pledge = self.get_质押表()
         
         listedstate.to_hdf(self.datapath2+"\\info.h5",'listedstate',format='table',mode='a',data_columns=listedstate.columns)
         info.to_hdf(self.datapath2+"\\info.h5",'info',format='table',mode='a',data_columns=info.columns)
@@ -210,6 +220,8 @@ class get_quote:
         LC_ShareStru.to_hdf(self.datapath2+"\\info.h5",'LC_ShareStru',format='table',mode='a',data_columns=LC_ShareStru.columns)
         lift.to_hdf(self.datapath2+"\\info.h5",'lift',format='table',mode='a',data_columns=lift.columns)
         industry.to_hdf(self.datapath2+"\\info.h5",'industry',format='table',mode='a',data_columns=industry.columns)
+        pledge.to_hdf(self.datapath2+"\\info.h5",'pledge',format='table',mode='a',data_columns=pledge.columns)
+        
         print('info相关数据更新完毕')
     #------------------------获取财报数据--------------------------------------------------------
     def get_财务表(self,sheetname):
@@ -255,9 +267,9 @@ class get_quote:
     def update_财务股本表(self,sheetname):
         '''
         更新财务数据,不包括股本表
-        sheetname='LC_FSDerivedData'
+        sheetname='LC_QIncomeStatementNew'
         '''
-        olddata = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',where='InfoPublDate>="20180201"')
+        olddata = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',where='InfoPublDate>="20180501"')
         #startdate = datetime.datetime.strftime(olddata['InfoPublDate'].max() ,"%Y%m%d")
         id2  = str(olddata['ID'].max())
         
@@ -306,14 +318,15 @@ class get_quote:
         print("指数成分股提取完毕....")
     
     def update_指数成分股(self):
-        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180201"')
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180701"')
         startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
         indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
-        sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where\
-                EndDate>"+startdate+" and IndexCode in "+indexcode+""
+        sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where \
+                 EndDate>"+startdate+" and IndexCode in "+indexcode+""
         newdata = pd.read_sql(sql,con=self._dbengine1)
         if len(newdata) >0:
-            newdata = pd.merge(newdata,data[['IndexCode','Index_SecuCode']],on='IndexCode',how='left')
+            temp_info = data[['IndexCode','Index_SecuCode']].drop_duplicates()
+            newdata = pd.merge(newdata,temp_info,on='IndexCode',how='left')
             newdata = self.astype(newdata,data)
             #newdata = data.append(newdata)
             newdata.to_hdf(self.datapath2+'\\constituent.h5',key='data',format='table',mode='r+',data_columns=newdata.columns,append=True)
@@ -335,7 +348,7 @@ class get_quote:
                 SecuMarket in (83,90) and ListedState=1) as b on \
                 a.companycode=b.companycode and AlternationReason in(11,12,23)"
        
-        sql = "select b.SecuCode,b.SecuAbbr,a.CompanyCode,a.InfoPublDate,a.TranDate as TradingDay,\
+        sql2 = "select b.SecuCode,b.SecuAbbr,a.CompanyCode,a.InfoPublDate,a.TranDate as TradingDay,\
                 a.TransfererName,a.InfoSource,a.InvolvedSum as 变动股数,a.DealPrice as 变动价格,a.DealTurnover ,\
                 a.TranMode,a.ReceiverName as 姓名,(select Ashares from LC_ShareStru as p where \
                 p.CompanyCode=a.CompanyCode and a.TranDate>=p.InfoPublDate and a.TranDate>=p.EndDate\
@@ -347,7 +360,7 @@ class get_quote:
                 INNER JOIN QT_DailyQuote c on a.innercode=c.innercode and a.TranDate=c.TradingDay\
                 where TranShareType=5 and  TranMode in (5,8,12,51,53,55,56)"
         data1 = pd.read_sql(sql,con=self._dbengine1)
-        data2 = pd.read_sql(sql,con=self._dbengine1)
+        data2 = pd.read_sql(sql2,con=self._dbengine1)
         #数据清洗
         temp_data = data2[data2['TranMode']==55]
         data11 = pd.merge(data1,temp_data[['SecuCode','TradingDay','姓名','TranMode']],how='left')
@@ -385,8 +398,6 @@ class get_quote:
         cyzb.to_hdf(self.datapath2+'\\risk.h5',key='cyzb',format='table',mode='w',data_columns=cyzb.columns)
         print("产业资本增减持数据更新完毕....") 
         
-        
-    
 #    def get_业绩预告(self,sheetname):
 #        '''
 #        获取原始财务报表数据，从无到有，
@@ -398,8 +409,44 @@ class get_quote:
 #        data = pd.read_sql(sql,con=self._dbengine1)
 #        data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=data.columns)
 #        print("%s提取完毕"%sheetname)
-       
-        
+    def get_daily成分股权重(self):
+        '''
+        沪深300、中证500、800、上证50的成分股权重，每月数据处理成每日数据，并保持至constituent.h5中的data2
+        '''
+        Index_SecuCode = ['000016','000905','000906']
+        constituent2 = pd.DataFrame()
+        for index_code  in Index_SecuCode:
+            print(index_code)
+            constituent = pd.read_hdf(self.datapath2+'\\constituent.h5','data',where="Index_SecuCode='"+index_code+"'") 
+            time = constituent['EndDate'].drop_duplicates()
+            time = time.sort_values()
+            time.index =  range(len(time))
+            data0 = pd.DataFrame()
+            for i in tqdm(range(len(time))):
+                date = datetime.datetime.strftime(time[i],"%Y%m%d") 
+                if i == len(time)-1:
+                    nextdate = '20990101'
+                else:
+                    nextdate = datetime.datetime.strftime(time[i+1],"%Y%m%d")    
+                temp = constituent[constituent['EndDate']==date]
+                code = str(tuple(temp['InnerCode'].drop_duplicates()))
+                data =  pd.read_hdf(self.datapath,'equity_quote',columns=['TradingDay','InnerCode','SecuCode','cp'] 
+                                     ,where="InnerCode in "+code+" and TradingDay>=%s and TradingDay<%s"%(date,nextdate))
+                data2 = pd.merge(data,temp,left_on=['TradingDay','InnerCode'],right_on=['EndDate','InnerCode'],how='left')
+                data2 = data2.sort_values(['InnerCode','TradingDay'])
+                data2 = data2.fillna(method='ffill')
+                data2['cp0'] = np.where((data2['SecuCode']!=data2['SecuCode'].shift(1)),data2['cp'],np.nan)
+                data2['cp0'] = data2['cp0'].fillna(method='ffill')
+                data2['adj_weight'] = data2['cp']/ data2['cp0'] * data2['Weight']
+                sum_weight = data2.groupby(['TradingDay'])[['adj_weight']].sum()
+                data3 = pd.merge(data2,sum_weight,left_on=['TradingDay'],right_index=True,how='left')
+                data3['Weight'] =  100*data3['adj_weight_x'] /   data3['adj_weight_y']  
+                data4 =  data3[['IndexCode', 'InnerCode', 'TradingDay', 'Weight', 'UpdateTime', 'Index_SecuCode']]
+                data0 = data0.append(data4)
+            data0 =  data0.rename(columns={'TradingDay':'EndDate'})
+            constituent2 = constituent2.append(data0)   
+        constituent2.to_hdf(self.datapath2+'\\constituent.h5',key='data2',format='table',mode='a',data_columns=constituent.columns)
+        return constituent2
     
     
 if __name__ == '__main__':
@@ -418,9 +465,9 @@ if __name__ == '__main__':
 #     get.get_财务表('LC_QIncomeStatementNew')
 #     get.get_财务表('LC_QCashFlowStatementNew')
 #     get.get_财务表('LC_FSDerivedData')
-     get.get_财务表('LC_NonRecurringEvent')
-
-     #---数据更新-------------------------------------------------------------------------------    
+#     get.get_财务表('LC_NonRecurringEvent')
+#
+#     #---数据更新-------------------------------------------------------------------------------    
 #     get.update_指数成分股()   
 #     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
 #     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
@@ -434,6 +481,10 @@ if __name__ == '__main__':
 #     get.get_bonus()
 #     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
 #     get.产业资本增减持() #产业资本增减持数据
+     #--自行处理沪深300、上证50、中证500、中证800的指数成分股每日权重表
+     get.get_daily成分股权重()
+         
+      
      
      
      
