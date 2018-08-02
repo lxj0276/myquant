@@ -249,10 +249,18 @@ class get_quote:
                     IfAdjusted in (1,2) "
         
         data = pd.read_sql(sql,con=self._dbengine1)
+#        years=  int((data['EndDate'].max() -  data['EndDate'].min()).days/365)
+#        k = int(len(data)/years)
+#        for i in range(0,len(data),k):
+#            temp_data = data.iloc[i:i+k]
+#            if i ==0 :
+#                temp_data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=temp_data.columns)
+#            else:
+#                temp_data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='r+',data_columns=temp_data.columns,append=True)
+    
         data.to_hdf(self.datapath2+'\\%s.h5'%sheetname,key='data',format='table',mode='w',data_columns=data.columns)
         print("%s提取完毕"%sheetname)
-#        data.to_hdf("C:\\py_data\\datacenter\\test.h5",key='test',format='table',mode='a',data_columns=data.columns)
-#        aa  = pd.read_hdf("C:\\py_data\\datacenter\\test.h5",'test',columns=['AccountingStandards'])
+
     
     def astype(self,data,bench_data):
         '''
@@ -318,7 +326,7 @@ class get_quote:
         print("指数成分股提取完毕....")
     
     def update_指数成分股(self):
-        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180701"')
+        data = pd.read_hdf(self.datapath2+'\\constituent.h5',key='data',where='EndDate>="20180601"')
         startdate = datetime.datetime.strftime(data['EndDate'].max() ,"%Y%m%d")
         indexcode = str(tuple(data['IndexCode'].drop_duplicates()))
         sql = "select IndexCode,InnerCode,EndDate,Weight,UpdateTime from LC_IndexComponentsWeight where \
@@ -463,10 +471,10 @@ if __name__ == '__main__':
 #     get.get_财务表('LC_IncomeStatementAll')
 #     get.get_财务表('LC_CashFlowStatementAll')
 #     get.get_财务表('LC_QIncomeStatementNew')
-#     get.get_财务表('LC_QCashFlowStatementNew')
-#     get.get_财务表('LC_FSDerivedData')
+     get.get_财务表('LC_QCashFlowStatementNew')
+     get.get_财务表('LC_FSDerivedData')
 #     get.get_财务表('LC_NonRecurringEvent')
-#
+
 #     #---数据更新-------------------------------------------------------------------------------    
 #     get.update_指数成分股()   
 #     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
@@ -481,8 +489,8 @@ if __name__ == '__main__':
 #     get.get_bonus()
 #     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
 #     get.产业资本增减持() #产业资本增减持数据
-     #--自行处理沪深300、上证50、中证500、中证800的指数成分股每日权重表
-     get.get_daily成分股权重()
+#     #--自行处理沪深300、上证50、中证500、中证800的指数成分股每日权重表
+#     get.get_daily成分股权重()
          
       
      
