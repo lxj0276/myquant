@@ -396,6 +396,191 @@ class public:
             data = pd.read_hdf(self.datapath2+'\\%s.h5'%sheetname,'data',where="InfoPublDate>="+startdate+"",columns=names)
         
         return data
+    
+    def get_指定日一致预期净利润数据(self,date):
+        '''
+        获取一致预期归母净利润
+        '''
+        sql =  "select EndDate, InnerCode,ForecastYear,RecentReport,left(SecuCode,6) as SecuCode,\
+                PNetProfitAvg,PNetProfitMed,PNetProfitTimeWeighted,RecentNetProfit,\
+                PNetProfitRate From C_EX_StockNetProfit  \
+                where StatisPeriod=180 and EndDate="+date+" ORDER BY EndDate"
+        data = pd.read_sql(sql,con=self._dbengine)
+        data = data.dropna(subset=['RecentReport'],axis=0)
+        data['RecentReport'] = data['RecentReport'].astype(data['ForecastYear'].dtype)
+        if len(data)>0:
+            data['PNetProfitRate'] = np.where(pd.isnull(data['PNetProfitRate'])==True,
+                                            data['PNetProfitAvg']/data['RecentNetProfit']-1,data['PNetProfitRate'])
+            #剔除财报公布后，已经出了当年数据，当年的预测同比数据，没有意义了
+            data = data[~(data['ForecastYear']==data['RecentReport'])]
+            
+            data['预期归母净利润同比FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['PNetProfitRate'].shift(-1),np.nan)
+            data['预期归母净利润同比FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['PNetProfitRate'].shift(-2),np.nan)
+            data['预期归母净利润FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['PNetProfitAvg'].shift(-1),np.nan)
+            data['预期归母净利润FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['PNetProfitAvg'].shift(-2),np.nan)
+            data['预期归母净利润2年复核增速'] =  (data['预期归母净利润FY1']/abs(data['RecentNetProfit']))**(1/2)-1
+            data['预期归母净利润3年复核增速'] =  (data['预期归母净利润FY2']/abs(data['RecentNetProfit']))**(1/3)-1
+            
+            data = data.drop_duplicates(['SecuCode'],keep='first') 
+            data = data[['SecuCode','PNetProfitRate','预期归母净利润同比FY1','预期归母净利润同比FY2',
+                         '预期归母净利润2年复核增速','预期归母净利润3年复核增速']]
+        return data
+        
+    def get_指定日一致预期折价数据(self,date,temp_quote):
+        '''
+        一致预期折价率数据
+        '''
+        sql =  "select EndDate,InnerCode,left(SecuCode,6) as SecuCode,\
+            	ExTarPriAvg,ExTarPriMedian,	ExReMaxandMin from C_EX_TargetPrice  \
+            where StatisPeriod=180 and EndDate="+date+" ORDER BY EndDate"
+        data = pd.read_sql(sql,con=self._dbengine)
+        if len(data)>0:
+            temp_quote = pd.merge(temp_quote,data,on=['InnerCode','SecuCode'],how='left')
+            temp_quote['平均折价率'] = (temp_quote['ExTarPriAvg'] / temp_quote['cp']  - 1).fillna(0)
+            temp_quote['中位折价率'] = (temp_quote['ExTarPriMedian'] / temp_quote['cp']  - 1).fillna(0)
+            temp_quote['平均折价率_调整'] = (temp_quote['ExReMaxandMin'] / temp_quote['cp']  - 1).fillna(0)
+            temp_quote = temp_quote.drop(['EndDate','ExTarPriAvg','ExTarPriMedian','ExReMaxandMin'],axis=1)
+        return temp_quote
+    
+    def get_指定日期一致预期其他数据(self,date,profitdata):
+        '''
+        获取一致预期其他数据
+        '''
+        sql =  "select EndDate,InnerCode,ForecastYear,left(SecuCode,6) as SecuCode,\
+                EPSAvg,BPSAvg,OCFPSAvg,DPSAvg,OpIncomeAvg,OpCostAvg,OpProfitAvg,TotalProfitAvg,\
+                NetProfitAvg,EBITAvg,EBITDAAvg,ROEAvg,ROAAvg,ROICAvg,PEAvg,PBAvg,PSAvg,\
+                EVAvg  From C_EX_DataStock  \
+                where StatisPeriod=180 and EndDate="+date+" ORDER BY EndDate"
+        data = pd.read_sql(sql,con=self._dbengine)
+        if len(data)>0:
+            temp = profitdata[profitdata['InfoPublDate']<=date].drop_duplicates(['CompanyCode'],keep='last')
+    
+            data = pd.merge(data,temp[['InnerCode','year','OperatingRevenue','OperatingProfit','NetProfit']],
+                        on='InnerCode',how='left')
+             #剔除财报公布后，已经出了当年数据，当年的预测同比数据，没有意义了
+            data = data[~(data['ForecastYear']==data['year'])] 
+            data['预期每股收益FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['EPSAvg'].shift(-1),np.nan)
+            data['预期每股收益FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['EPSAvg'].shift(-2),np.nan)
+            
+            data['预期每股净资产FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['BPSAvg'].shift(-1),np.nan)
+            data['预期每股净资产FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+
+                                                    data['BPSAvg'].shift(-2),np.nan)
+            data['预期每股股利FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['DPSAvg'].shift(-1),np.nan)
+            data['预期每股股利FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['DPSAvg'].shift(-2),np.nan)
+           
+            data['预期每股现金流FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['OCFPSAvg'].shift(-1),np.nan)
+            data['预期每股现金流FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['OCFPSAvg'].shift(-2),np.nan)
+            
+            data['预期peFY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['PEAvg'].shift(-1),np.nan)
+            data['预期peFY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['PEAvg'].shift(-2),np.nan)
+           
+            data['预期pbFY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['PBAvg'].shift(-1),np.nan)
+            data['预期pbFY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['PBAvg'].shift(-2),np.nan)
+           
+            data['预期psFY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['PSAvg'].shift(-1),np.nan)
+            data['预期psFY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['PSAvg'].shift(-2),np.nan)
+            
+            data['预期企业价值倍数FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['EVAvg'].shift(-1),np.nan)
+            data['预期企业价值倍数FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['EVAvg'].shift(-2),np.nan)
+           
+            data['预期roeFY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['ROEAvg'].shift(-1),np.nan)
+            data['预期roeFY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['ROEAvg'].shift(-2),np.nan)
+            data['预期roaFY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['ROAAvg'].shift(-1),np.nan)
+            data['预期roaFY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['ROAAvg'].shift(-2),np.nan)
+           
+            data['预期投资回报率FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['ROICAvg'].shift(-1),np.nan)
+            data['预期投资回报率FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['ROICAvg'].shift(-2),np.nan)
+           
+            data['预期企业价值倍数FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['EVAvg'].shift(-1),np.nan)
+            data['预期企业价值倍数FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['EVAvg'].shift(-2),np.nan)            
+            data['预期营业收入FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['OpIncomeAvg'].shift(-1),np.nan)
+            data['预期营业收入FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['OpIncomeAvg'].shift(-2),np.nan)
+            data['预期营业利润FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['OpProfitAvg'].shift(-1),np.nan)
+            data['预期营业利润FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['OpProfitAvg'].shift(-2),np.nan)
+           
+            data['预期息税前利润FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['EBITAvg'].shift(-1),np.nan)
+            data['预期息税前利润FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['EBITAvg'].shift(-2),np.nan)
+            data['预期净利润FY1'] = np.where(data['SecuCode']==data['SecuCode'].shift(-1),
+                                                    data['NetProfitAvg'].shift(-1),np.nan)
+            data['预期净利润FY2'] = np.where(data['SecuCode']==data['SecuCode'].shift(-2),
+                                                    data['NetProfitAvg'].shift(-2),np.nan)
+            
+            #同比、复合增速等数据
+            data['预期利润同比'] = data['NetProfitAvg'] /  abs(data['NetProfit']) -1
+            data['预期利润同比FY1'] = data['预期净利润FY1'] /  abs(data['NetProfitAvg']) -1
+            data['预期利润同比FY2'] = data['预期净利润FY2'] /  abs(data['预期净利润FY1']) -1
+            data['预期净利润2年复核增速'] =  (data['预期净利润FY1']/abs(data['NetProfit']))**(1/2)-1
+            data['预期净利润3年复核增速'] =  (data['预期净利润FY2']/abs(data['NetProfit']))**(1/3)-1
+            
+          
+            data['预期营业收入同比'] = data['OpIncomeAvg'] /  abs(data['OperatingRevenue']) -1
+            try:
+                data['预期营业收入同比FY1'] = data['预期营业收入FY1'] / abs(data['OpIncomeAvg']) -1
+                data['预期营业收入同比FY2'] = data['预期营业收入FY2'] /  abs(data['预期营业收入FY1']) -1
+            except:
+                data['预期营业收入同比FY1'] = np.nan
+                data['预期营业收入同比FY1'] = np.nan
+            
+            data['预期营业收入2年复核增速'] =  (data['预期营业收入FY1']/abs(data['OperatingRevenue']))**(1/2)-1
+            data['预期营业收入3年复核增速'] =  (data['预期营业收入FY2']/abs(data['OperatingRevenue']))**(1/3)-1
+            
+            data['预期营业利润同比'] = data['OpProfitAvg'] /  abs(data['OperatingProfit']) -1
+            try:
+                data['预期营业利润同比FY1'] = data['预期营业利润FY1'] /  abs(data['OpProfitAvg']) -1
+                data['预期营业利润同比FY2'] = data['预期营业利润FY2'] /  abs(data['预期营业利润FY1']) -1
+            except:
+                data['预期营业利润同比FY1'] = np.nan
+                data['预期营业利润同比FY2'] = np.nan
+            data['预期营业利润2年复核增速'] =  (data['预期营业利润FY1']/abs(data['OperatingProfit']))**(1/2)-1
+            data['预期营业利润3年复核增速'] =  (data['预期营业利润FY2']/abs(data['OperatingProfit']))**(1/3)-1               
+            data = data.drop_duplicates(['SecuCode'],keep='first')   
+            data = data[['SecuCode' ,'EPSAvg','预期每股收益FY1' ,'预期每股收益FY2'  ,
+                  'BPSAvg','预期每股净资产FY1'  ,'预期每股净资产FY2'  ,'DPSAvg','预期每股股利FY1'  
+                  ,'预期每股股利FY2'  ,'OCFPSAvg','预期每股现金流FY1','预期每股现金流FY2'  ,
+                  'PEAvg','预期peFY1'  ,'预期peFY2' ,'PBAvg','预期pbFY1'  ,'预期pbFY2'  ,'PSAvg'
+                  ,'预期psFY1'  ,'预期psFY2'  ,'EVAvg','预期企业价值倍数FY1'  ,'预期企业价值倍数FY2',
+                    'ROEAvg','预期roeFY1'  ,'预期roeFY2',
+                  'ROAAvg','预期roaFY1'  ,'预期roaFY2' ,'ROICAvg','预期投资回报率FY1'  ,'预期投资回报率FY2' 
+                  ,'预期利润同比'  ,'预期利润同比FY1' ,'预期利润同比FY2'  
+                  ,'预期净利润2年复核增速'  ,'预期净利润3年复核增速'  ,'预期营业收入同比'  ,'预期营业收入同比FY1' 
+                  ,'预期营业收入同比FY2'  ,'预期营业收入2年复核增速'  ,'预期营业收入3年复核增速'  ,'预期营业利润同比'
+                  ,'预期营业利润同比FY1'  ,'预期营业利润同比FY2'  ,'预期营业利润2年复核增速'  ,'预期营业利润3年复核增速']] 
+	
+        return data
         
     
     def get_nextrtn(self,buylist,quote):
