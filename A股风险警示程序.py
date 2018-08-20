@@ -156,9 +156,10 @@ class risk:
                 a.companycode=b.companycode and AlternationReason in(11,12,23)\
                 left join QT_DailyQuote e on a.innercode=e.innercode and e.TradingDay=\
                 (select max(TradingDay) from qt_dailyquote where innercode=3)\
-                where reportdate >"+startdate+" order by reportdate desc"
+                where AlternationDate >"+startdate+" order by reportdate desc"
         holder = pd.read_sql(sql,con=self._dbengine1)
         return holder
+    
     
 if __name__ == "__main__":
     #获取数据

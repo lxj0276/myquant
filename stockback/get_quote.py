@@ -471,26 +471,26 @@ if __name__ == '__main__':
 #     get.get_财务表('LC_IncomeStatementAll')
 #     get.get_财务表('LC_CashFlowStatementAll')
 #     get.get_财务表('LC_QIncomeStatementNew')
-     get.get_财务表('LC_QCashFlowStatementNew')
-     get.get_财务表('LC_FSDerivedData')
+#     get.get_财务表('LC_QCashFlowStatementNew')
+#     get.get_财务表('LC_FSDerivedData')
 #     get.get_财务表('LC_NonRecurringEvent')
 
-#     #---数据更新-------------------------------------------------------------------------------    
-#     get.update_指数成分股()   
-#     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
-#     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
-#     get.update_财务股本表('LC_BalanceSheetAll')
-#     get.update_财务股本表('LC_IncomeStatementAll')
-#     get.update_财务股本表('LC_CashFlowStatementAll')
-#     get.update_财务股本表('LC_QIncomeStatementNew')
-#     get.update_财务股本表('LC_QCashFlowStatementNew') 
-#     get.update_财务股本表('LC_FSDerivedData')    
-#     get.update_财务股本表('LC_NonRecurringEvent')    
-#     get.get_bonus()
-#     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
-#     get.产业资本增减持() #产业资本增减持数据
-#     #--自行处理沪深300、上证50、中证500、中证800的指数成分股每日权重表
-#     get.get_daily成分股权重()
+     #---数据更新-------------------------------------------------------------------------------    
+     get.update_指数成分股()   
+     get.update_quote('equity_quote',get.get_equityquote)#更新股票程序
+     get.update_quote('index_quote',get.get_indexquote) #更新指数行情程序
+     get.update_财务股本表('LC_BalanceSheetAll')
+     get.update_财务股本表('LC_IncomeStatementAll')
+     get.update_财务股本表('LC_CashFlowStatementAll')
+     get.update_财务股本表('LC_QIncomeStatementNew')
+     get.update_财务股本表('LC_QCashFlowStatementNew') 
+     get.update_财务股本表('LC_FSDerivedData')    
+     get.update_财务股本表('LC_NonRecurringEvent')    
+     get.get_bonus()
+     get.info_to_hdf() #上市状态、代码、简称、公司代码等数据
+     get.产业资本增减持() #产业资本增减持数据
+     #--自行处理沪深300、上证50、中证500、中证800的指数成分股每日权重表
+     get.get_daily成分股权重()
          
       
      

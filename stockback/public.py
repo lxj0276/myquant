@@ -71,10 +71,44 @@ class public:
         z = group.apply(self.section_z_score标准化,indicator)
         z = z.apply(lambda x:pd.Series(x))
         z = z.stack()
+        z[z==99] = np.nan
         temp['%s_zs'%indicator] = z.values
+       
         #中性化处理
         temp['%s_nt'%indicator] = group.apply(self.section_regress,'%s_zs'%indicator,columns).values
-        quote_factor = pd.merge(quote_factor,temp[['SecuCode','TradingDay','%s_zs'%indicator,'%s_nt'%indicator]],on=['SecuCode','TradingDay'],how='left')
+        quote_factor = pd.merge(quote_factor,temp[['SecuCode','TradingDay','%s_nt'%indicator]],on=['SecuCode','TradingDay'],how='left')
+        return quote_factor
+    
+    def section_因子中性化(self,quote_factor,indicator,industry,mktcap=None):
+        '''
+        截面单个因子中性化处理
+        1. 因子中位数去极值；
+        2. 因子标准
+        3. 以对数总市值+行业虚拟变量为X值，以因子值为Y值，进行中性化回归处理，去残差作为新的因子值
+        quote_factor = buylist2.loc[:,:]
+        industry = 'FirstIndustryName'
+        mktcap = '流通市值',若不为空，则进行市值中心化
+        zs:z_core,代表标准化
+        indicator = 'pb'
+        nt:nuetralize,代表进行行业、市值中性化处理
+        '''
+        temp = pd.get_dummies(quote_factor[industry])
+        if  mktcap is not None:
+            columns = list(quote_factor[industry].drop_duplicates())+[mktcap]
+            temp = pd.merge(quote_factor[['SecuCode','TradingDay',indicator,mktcap]],temp,left_index=True,right_index=True)
+            temp[mktcap] = temp[mktcap].apply(lambda x:np.log(x))
+        else:
+            columns = list(quote_factor[industry].drop_duplicates())
+            temp = pd.merge(quote_factor[['SecuCode','TradingDay',indicator]],temp,left_index=True,right_index=True)
+        temp = temp.dropna(subset=[columns],how='any',axis=0)
+        temp = temp.dropna(subset=[indicator],how='any',axis=0)
+        temp.index = range(len(temp))
+        
+        #因子去极值并进行标准化
+        temp['%s_zs'%indicator] = temp.apply(self.section_z_score标准化,indicator).values
+        #中性化处理
+        temp['%s_nt'%indicator] = temp.apply(self.section_regress,'%s_zs'%indicator,columns).values
+        quote_factor = pd.merge(quote_factor,temp[['SecuCode','TradingDay','%s_nt'%indicator]],on=['SecuCode','TradingDay'],how='left')
         return quote_factor
     
     def section_regress(self,data,y,x):
@@ -108,14 +142,12 @@ class public:
             data['value'] = (data['value']- data['value'].mean())/ data['value'].std()
         return data['value'].values
         
-    def section_z_score标准化(self,data,indicator,industryname=None):
+    def section_z_score标准化(self,data,indicator):
         '''
         标准化处理，采取中位数去极值法
         indicator:需要有industyrname名称，返回处理后的data值
         data = temp_value
         indicator = '单季销售毛利率同比'
-        industryname = 'FirstIndustryName'
-        inudstryname：非空时，进行行业标准处理，注意，不是行业调整，而是行业标准处理
         '''
         #中位数取极值法
         median = data[indicator].median()
@@ -123,30 +155,8 @@ class public:
         #data['value'] = np.clip(data['value'],median-5*newmedian,median+median+5*new_median)
         data['value'] = np.where(data[indicator]>median+5*new_median,median+5*new_median,
                             np.where(data[indicator]<median-5*new_median,median-5*new_median,data[indicator]))
-        data['value2'] = (data['value'] -data['value'].mean()) / data['value'].std()
-        #行业内Z_Score处理
-        if industryname is not None:
-            #中位数去极值法，进行极值处理
-            industry_median = data.groupby([industryname])[[indicator]].median()
-            industry_median[industryname] = industry_median.index
-            data = pd.merge(data,industry_median,on=industryname,how='left')
-            data['median'] =  abs(data['%s_x'%indicator] - data['%s_y'%indicator])
-            median = data.groupby([industryname])[['median']].median()
-            median[industryname] = median.index
-            data = pd.merge(data,median,on=industryname,how='left')
-    
-            data['value_up'] = data['%s_y'%indicator] + 5*abs(data['median_y'] )
-            data['value_down'] = data['%s_y'%indicator] - 5*abs(data['median_y'] )
-            data['value'] = np.where(data['%s_x'%indicator]>data['value_up'],data['value_up'],
-                                np.where(data['%s_x'%indicator]<data['value_down'],data['value_down'],data['%s_x'%indicator]))
-            #进行标准化
-            mean = data.groupby([industryname])[['value']].mean()
-            mean[industryname] = mean.index
-            data = pd.merge(data,mean,on=industryname,how='left')
-            std = data.groupby([industryname])[['value_x']].std()
-            std[industryname] = std.index
-            data = pd.merge(data,std,on=industryname,how='left')
-            data['value2'] =  (data['value_x_x'] - data['value_y'])/ data['value_x_y']             
+        data['value2'] = (data['value'] -data['value'].mean()) / data['value'].std()      
+        data['value2'] = data['value2'].fillna(99)#为空值是设定为99，以便中性化时需要用到
         return data['value2'].values
     
     def finance_getinfo_rank(self,data,info,fill=False):
@@ -623,8 +633,83 @@ class public:
         
         print("事件驱动统计完毕...")
           
+    def get_rankic(self,quote_factor,indicator,ifnuetral=False):
+        '''
+        顺带获取因子回归收益
+        indicator = 'pettm'
+        获取每一期的相关系数，rankic值,ICdecay值
+        industry:非空时，则计算该指标的行业调整后的IC等值
+        industry_name ='行业一级'
+        indicator = 'A股流通市值'
+        '''
+        value = self.get_因子回归收益(quote_factor,indicator)#因子回归的收益系列
+        t_mean = pd.Series(data=abs(value['tvalues']).mean(),index=['%s_nt'%indicator])
+        t_prob = pd.Series(100*value[abs(value['tvalues'])>=2].count()['tvalues']/value['tvalues'].count(),index=['%s_nt'%indicator])
+        mean_sy = pd.Series(value['factor_sy'].mean(),index=['%s_nt'%indicator])
+        sy_std =  pd.Series(value['factor_sy'].std(),index=['%s_nt'%indicator])
+        sy_t,sy_p_value= stats.ttest_1samp(value['factor_sy'], 0)
+        sy_t =  pd.Series(sy_t,index=['%s_nt'%indicator])
+        sy_prob = pd.Series(100*value[value['factor_sy']>0].count()['factor_sy']/value['factor_sy'].count(),index=['%s_nt'%indicator])
+           
+        
+        #quote3 = quote[['SecuCode','TradingDay','next1',indicator]]
+        columns_names = ['ICRank']
+        quote3 =  quote_factor[['SecuCode','TradingDay','next1','next2','next3','next4','next5','next6',indicator]]
+        if ifnuetral==True:
+            quote3 =  quote_factor[['SecuCode','TradingDay','next1','next2','next3','next4','next5','next6',indicator,'%s_nt'%indicator]]
+            columns_names = ['ICRank','ICRank_netural']
+            indicator =  '%s_zs'%indicator
+                
+        #获取IC、ir标准差等值
+        group = quote3.drop(['next2','next3','next4','next5','next6'],axis=1).groupby(['TradingDay'])
+        corr = group.corr(method='spearman')#秩相关系数
+        corr['type'] = pd.DataFrame(corr.index)[0].apply(lambda x:x[1]).values
+        corr =  corr[corr['type']=='next1']
+        corr =  corr.drop(['next1','type'],axis=1) 
+        meanic = corr.mean()
+        stdic = corr.std()
+        minic = corr.min()
+        maxic = corr.max()
+        icir = meanic/stdic
+        gl = 100*(corr[corr>0].count()/corr.count())
+        result = pd.concat([t_mean,t_prob,mean_sy,sy_std,sy_t,sy_prob,meanic,stdic,minic,maxic,icir,gl],axis=1)
+        result.columns = ['T值绝对值均值','绝对T值大于2的概率','因子收益均值','因子收益标准差','因子收益T值','因子收益大于0的概率',
+                          'IC均值','IC标准差','IC最小值','IC最大值','ICIR','IC大于0的概率%'] 
+        #获取因子decay
+        group2 = quote3.groupby(['TradingDay'])
+        corr2 = group2.corr(method='spearman')#秩相关系数
+        #corr2['TradingDay'] = pd.DataFrame(corr2.index)[0].apply(lambda x:x[0]).values
+        corr2['decay'] = pd.DataFrame(corr2.index)[0].apply(lambda x:x[1]).values
+        corr2 =  corr2[corr2['decay'].isin(['next1','next2','next3','next4','next5','next6'])]
+        corr2 =  corr2.drop(['next1','next2','next3','next4','next5','next6'],axis=1) 
+        decay = corr2.groupby(['decay']).mean().T
+        corr.columns = columns_names
+        corr['指标'] = indicator
+        corr['TradingDay'] = np.array(pd.DataFrame(corr.index)[0].apply(lambda x:x[0]))
+        #corr['TradingDay'] = corr['TradingDay'].apply(lambda x:datetime.datetime.strftime(x,"%Y%m%d"))
+        result['指标'] = result.index
+        decay['指标'] = decay.index
+        return corr,result,decay,value
     
-    def ic_rtnk(self,buylist0,factor):
+    def get_因子回归收益(self,quote_factor,indicator):
+        '''
+        对每一期的因子收益进行回归，从而达到因子收益，行业收益，及
+        industry = '行业一级'
+        indicator = '1个月动量'
+        '''
+        quote_factor = quote_factor.sort_values(['TradingDay'])
+        quote_factor.index = range(len(quote_factor))
+        temp = pd.get_dummies(quote_factor['FirstIndustryName'])
+        quote_factor[temp.columns] = temp
+        columns = list(temp.columns)+ ['mktcap','%s_zs'%indicator]
+        quote_factor2 = quote_factor.dropna(subset=['%s_zs'%indicator,'next1'],axis=0)
+        group = quote_factor2.groupby(['TradingDay'])
+        value = pd.DataFrame(group.apply(self.section_regress2,'next1',columns))
+        value['tvalues'] =  value[0].apply(lambda x:x[0])
+        value['factor_sy'] =  value[0].apply(lambda x:x[1])
+        return value
+    
+    def ic_rank(self,buylist0,factor):
         '''
         计算IC即ICrank值
         buylist0 dataframe 有有TradingDay、next_rtn、因子值数据
